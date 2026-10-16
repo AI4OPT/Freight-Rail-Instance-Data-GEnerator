@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Editor directories
+.vscode
+.DS_Store
+
+# Virtual environments
+.venv
+
+# Generated Output Data
+output
+
+# Gurobi solutions and logs, one folder per run
+gurobi_solutions
+gurobi_service_design.log	
+service_design_solutions
+
+# Generated Rail Network Files
+rail_network
+
+# Downloaded Input Data Files
+input_data
+
+# Environment variables
+.env
+# Config file & schema - use the CLI to generate
+schema/

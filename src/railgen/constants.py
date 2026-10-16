@@ -1,0 +1,74 @@
+"""Constants not set by user config."""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_ = load_dotenv()
+
+# Where FRIDGE output is saved to
+OUTPUT_DIR_NAME = "output"
+TRAIN_SCHEDULE_FILE_NAME = "schedule.csv"
+
+# Where input data file are pulled from
+INPUT_DATA_DIR = Path("input_data")
+
+# Generated Rail Network Graph and related files
+RAIL_NETWORK_DIR = Path("rail_network")
+
+# Reverse geocoding (BigDataCloud)
+GEOCODE_API_URL = "https://api-bdc.net/data/reverse-geocode"
+GEOCODE_CONCURRENCY = 10  # max simultaneous geocoding requests
+BDC_KEY = os.environ.get("BDC_KEY", "")
+
+# Forward geocoding (Nominatim). Finds FAF zone cities that match no yard group so we can fall back to the nearest one.
+FORWARD_GEOCODE_API_URL = "https://nominatim.openstreetmap.org/search"
+FRIDGE_USER_AGENT = "FRIDGE/1.0 (https://github.com/AI4OPT/FRIDGE)"
+FORWARD_GEOCODE_MIN_INTERVAL_S = 1.05  # Nominatim usage policy: max ~1 request/second
+
+# Graph Generation Settings
+# NTAD is on ArcGIS Hub. Each download is a fresh export behind a signed URL that
+# expires in about an hour
+HUB_DOWNLOAD_URL = "https://hub.arcgis.com/api/download/v1/items/{}/geojson"
+YARD_GROUPS_ITEM_ID = "e8579994d57049a6a702c3fa4af01fcf"  # USDOT_BTS "Rail Yards"
+YARD_GROUPS_FILE = "NTAD_NA_Rail_Yards.geojson"
+NA_RAIL_NETWORK_ITEM_ID = (
+    "e143f436d4774402aa8cca1e663b1d24"  # USDOT_BTS "North American Rail Network Lines"
+)
+NA_RAIL_NETWORK_FILE = "NTAD_NA_Rail_Network.geojson"
+HUB_EXPORT_POLL_S = 5  # gap between status checks while an export is being generated
+HUB_EXPORT_TIMEOUT_S = 900  # give up if the export never reaches "Completed"
+# Every NTAD yard record with its elevation and city. The lookups are slow so we cache them here and build `ygs_dict.json` from this.
+YARD_RECORDS_FILE = "yard_records.json"
+# Yard groups after the changes file is applied
+YARD_GROUPS_DICT_FILE = "ygs_dict.json"
+ALL_DISTANCES_FILE = "all_distances.json"
+GRAPH_FILE = "graph.gexf"
+# E.g. drop edge A-C if some B has A-B + B-C shorter than A-C, or longer by less than this fraction (likely the same track running through B).
+SAME_TRACK_TOLERANCE = 0.03
+# Hand fixes to the NTAD yard records. Only rows with apply = `yes` are used.
+# - `merge`: duplicate record of a yard, folded into `merge_into`.
+# - `drop`: not a freight yard (passenger, tourist) or off the network. Only removed when `graph.gexf` is rebuilt; until then it just can't represent a FAF zone.
+# - `bar`: stays in the network but can't represent a FAF zone (probably passenger-only, unconfirmed).
+YARD_GROUP_CHANGES_FILE = "yg_changes.csv"
+# Geocoded cities of FAF zones with no yard group match, cached so we don't hit the geocoder every load.
+FAF_ZONE_COORDS_FILE = "faf_zone_coords.json"
+# LaTeX table of the yard groups picked for each FAF zone, written when they're assigned.
+ZONE_YARD_GROUPS_FILE = "zone_yard_groups.tex"
+ELEVATION_API_URL = "https://api.open-meteo.com/v1/elevation"  # API Docs: https://open-meteo.com/en/docs/elevation-api
+ELEVATION_API_BATCH_SIZE = 99  # API allows up to 100 coords per call, but we use 99 to avoid exceeding the rate limit
+ELEVATION_API_BATCHES_PER_MINUTE = 5  # limit is 600 coords/min; 5 x 99 stays under
+ELEVATION_API_MAX_ATTEMPTS = 3
+ELEVATION_API_RETRY_WAIT_S = 61  # the rate limit is per minute
+
+# FAF6 freight data
+FAF6_ZIP_URL = "https://faf.ornl.gov/faf6/data/Download_Files/ZIP/FAF6.0.zip"
+FAF6_CSV_NAME = "FAF6.0.csv"
+FAF6_METADATA_NAME = "FAF6_Metadata.xlsx"
+FAF6_ZONES_CSV_NAME = "FAF6_metadata_zones_table_edited.csv"
+# FAF5 data - has intra-zone distances which faf6 does not
+FAF5_ZIP_URL = "https://faf.ornl.gov/faf5/Data/Download_Files/FAF5.7.1_2018-2024.zip"
+FAF5_CSV_NAME = "FAF5.7.1_2018-2024.csv"
+# How much of the "Multimodal" DMS mode freight movement should be considered as Rail
+MULTIMODAL_INCLUDE_PROPORTION = 0.5

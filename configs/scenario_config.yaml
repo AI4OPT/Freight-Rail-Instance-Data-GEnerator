@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../schema/scenario_config.schema.json
+
+general_settings:
+  seed: null
+  scenario_count: 10
+  minimum_dwell_time_minutes: 30
+distributions_pool: {}
+default_distributions:
+  initial_departure:
+    distr_type: normal
+    mean: 0.0
+    stdev: 5.0
+  trip_time_percent_diff:
+    distr_type: normal
+    mean: 0.0
+    stdev: 5.0
+  dwell_time:
+    distr_type: normal
+    mean: 0.0
+    stdev: 5.0
+train_category_distributions_overrides: {}
+yard_group_dwell_distributions: {}
+leg_trip_time_percent_diff_distributions: {}
+region_distributions: []
