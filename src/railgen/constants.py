@@ -24,7 +24,9 @@ BDC_KEY = os.environ.get("BDC_KEY", "")
 
 # Forward geocoding (Nominatim). Finds FAF zone cities that match no yard group so we can fall back to the nearest one.
 FORWARD_GEOCODE_API_URL = "https://nominatim.openstreetmap.org/search"
-FRIDGE_USER_AGENT = "FRIDGE/1.0 (https://github.com/AI4OPT/FRIDGE)"
+FRIDGE_USER_AGENT = (
+    "FRIDGE/1.0 (https://github.com/AI4OPT/Freight-Rail-Instance-Data-GEnerator)"
+)
 FORWARD_GEOCODE_MIN_INTERVAL_S = 1.05  # Nominatim usage policy: max ~1 request/second
 
 # Graph Generation Settings

@@ -9,7 +9,7 @@ This project uses `uv` for dependency and environment management. Install it [he
 ### Clone the repository
 
 ```sh
-git clone https://github.com/AI4OPT/FRIDGE.git
+git clone https://github.com/AI4OPT/Freight-Rail-Instance-Data-GEnerator.git
 cd FRIDGE
 ```
 
