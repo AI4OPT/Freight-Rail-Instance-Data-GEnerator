@@ -98,7 +98,7 @@ service_design_settings:
     automotive:
       - "36"
       - "37"
-  group_train_types: # bulk rides its own bulk type or manifest; vehicles only automotive
+  group_train_types: 
     coal:
       - coal
       - manifest
@@ -159,10 +159,10 @@ service_design_settings:
     B: 17000.0
     I: 12000.0
   max_runs_per_week: 7
-  max_symbols_per_service: 2 # limit on runs per week = max_runs_per_week x this = 14 (was 3, limit 21)
+  max_symbols_per_service: 2 # limit on runs per week = max_runs_per_week x max_symbols_per_service
   costs:
-    train_start: 25.0 # was 1000.0 before the distinct-train test
-    per_train_mile: 0.1 # was 1.0 before the distinct-train test
+    train_start: 25.0 
+    per_train_mile: 0.1 
     per_distinct_train: 7500.0 # weekly charge for each train that runs at all, whatever its runs
     transfer_fixed: 20.0 # cost per change of train of a commodity at a yard
     transfer_per_ton: 0.01 # plus this per ton/week of that commodity
