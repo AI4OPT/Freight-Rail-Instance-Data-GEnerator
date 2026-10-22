@@ -5,10 +5,14 @@ import random
 import pytest
 
 from railgen.models import DayOfWeek, TrainCategory, Week, YgKey, ZoneCode
-from railgen.schedule_gen.attributes import TonnageByDay
+from railgen.schedule_gen.attributes import TonnageByDay, TrainSymbol
 from railgen.schedule_gen.demand import (
+    MULTIMODAL_MODE,
+    RAIL_MODE,
     CandidateYardPair,
     Commodity,
+    DemandReport,
+    kept_lines,
     select_yard_pairs,
     split_by_size,
     yard_targets,
@@ -17,9 +21,12 @@ from railgen.schedule_gen.schedule_config import (
     CarWeight,
     LocomotivePower,
     ServiceDesignSettings,
+    SolverSettings,
 )
 from railgen.schedule_gen.solution_to_trains import (
+    LongStretch,
     crew_change_positions,
+    long_stretch_lines,
     pick_days,
     split_runs,
 )
@@ -89,19 +96,23 @@ def test_yard_targets_sum_to_zero():
     zp = (ZoneCode("001"), ZoneCode("002"))
     cs = [
         Commodity(
-            origin=A1, destination=B1, group="coal", tons_per_week=100.0, zone_pair=zp
+            origin=A1,
+            destination=B1,
+            train_type="bulk",
+            tons_per_week=100.0,
+            zone_pair=zp,
         ),
         Commodity(
             origin=A2,
             destination=B1,
-            group="manifest",
+            train_type="manifest",
             tons_per_week=40.0,
             zone_pair=zp,
         ),
         Commodity(
             origin=B1,
             destination=A1,
-            group="manifest",
+            train_type="manifest",
             tons_per_week=10.0,
             zone_pair=zp[::-1],
         ),
@@ -119,6 +130,38 @@ def test_crew_changes_include_work_dwell():
     # Duty 3, 6; node 2 needs 2 + 3 -> 11 > 10.5, change at 2; then 5, 8, 11 -> change at 4.
     assert plan.change_positions == [2, 4]
     assert plan.over_limit == []
+
+
+def test_crew_change_merges_with_a_work_stop_next_door():
+    # Work at node 1 (1.5 h dwell), node 2 is 0.1 h further, then a 3 h hop: duty 8 + 1.5 + 0.1
+    # at node 2, which needs 3 more -> change. Node 1 is 0.1 h back, so the crew changes there.
+    hops, work = [8, 0.1, 3], {1: 1.5}
+
+    def changes(merge_hours):
+        return crew_change_positions(hops, work, 12, merge_hours).change_positions
+
+    assert changes(0.0) == [2]
+    assert changes(1 / 3) == [1]
+    assert changes(0.05) == [2]  # node 1 is 0.1 h back, too far
+
+
+def test_a_hop_longer_than_a_crew_shift_is_reported():
+    # The hop from node 1 takes 14 h: a crew changes at node 1, but no change can split it.
+    plan = crew_change_positions([2, 14, 3], {}, usable_hours=12)
+    assert plan.change_positions == [1, 2]
+    assert plan.over_limit == [1]
+    stretch = LongStretch(
+        symbol=TrainSymbol("MTRN_1"),
+        bgn_yg=YgKey("A-1"),
+        end_yg=YgKey("B-2"),
+        hours=14.0,
+    )
+    (line,) = long_stretch_lines([stretch], 12.0)
+    assert line.startswith(
+        "1 train symbols have 1 stretches longer than a crew's 12 usable"
+    )
+    assert line.endswith("MTRN_1 A-1 -> B-2 14.0 h")
+    assert long_stretch_lines([], 12.0) == []
 
 
 def test_dwell_table():
@@ -147,7 +190,7 @@ def test_split_runs_into_symbols():
 def test_vehicles_ride_only_automotive():
     s = ServiceDesignSettings()
     assert s.group_of("36") == "automotive"
-    assert s.group_train_types["automotive"] == ["automotive"]
+    assert s.train_type_of("automotive") == "automotive"
     assert s.group_of("43") == "manifest"
 
 
@@ -246,6 +289,8 @@ def test_travel_time_is_slower_uphill():
     # Downhill: 20 km at 40 km/h. Uphill at 0.5%: speed cut by 0.5 x 10% = 5%.
     assert network.get_travel_time([b, a]) == pytest.approx(30.0)
     assert network.get_travel_time([a, b]) == pytest.approx(20 / 38 * 60)
+    # At a category's own speed: 20 km at 20 km/h downhill.
+    assert network.get_travel_time([b, a], 20.0) == pytest.approx(60.0)
 
 
 def test_extraction_gives_category_and_locomotives_per_leg():
@@ -263,7 +308,6 @@ def test_extraction_gives_category_and_locomotives_per_leg():
             path=tuple(path),
             stop_positions=(0, 3),
             leg_km=(31.0,),
-            leg_hours=(0.8,),
             leg_capacity_tons=(12_000.0,),
         )
 
@@ -312,7 +356,6 @@ def _line_service(sid: str, train_type: str):
         path=yards,
         stop_positions=(0, 1, 2, 3),
         leg_km=(100.0, 100.0, 100.0),
-        leg_hours=(1.0, 1.0, 1.0),
         leg_capacity_tons=(1000.0, 1000.0, 1000.0),
     )
 
@@ -328,7 +371,7 @@ class _StubNetwork:
         self.cfg = Config()
         self.ygs_dict = {y: SimpleNamespace(elevation=0.0) for y in yards}
 
-    def get_travel_time(self, path):
+    def get_travel_time(self, path, speed_km_h=None):
         return 300.0 * (len(path) - 1)
 
     def get_ruling_grade(self, path, min_hop_km):
@@ -404,7 +447,6 @@ def _line_candidate(sid: str, path: tuple[YgKey, ...]):
         path=path,
         stop_positions=tuple(range(n + 1)),
         leg_km=(100.0,) * n,
-        leg_hours=(1.0,) * n,
         leg_capacity_tons=(1000.0,) * n,
     )
 
@@ -418,10 +460,18 @@ def test_od_index_keeps_each_commodity_on_its_route():
     zp = (ZoneCode("001"), ZoneCode("002"))
     cs = [
         Commodity(
-            origin=a, destination=c, group="manifest", tons_per_week=100.0, zone_pair=zp
+            origin=a,
+            destination=c,
+            train_type="manifest",
+            tons_per_week=100.0,
+            zone_pair=zp,
         ),
         Commodity(
-            origin=d, destination=e, group="manifest", tons_per_week=50.0, zone_pair=zp
+            origin=d,
+            destination=e,
+            train_type="manifest",
+            tons_per_week=50.0,
+            zone_pair=zp,
         ),
     ]
     routes = {
@@ -429,7 +479,7 @@ def test_od_index_keeps_each_commodity_on_its_route():
         (d, e): Route(path=(d, b, e), cost=1.0, km=200.0),
     }
     cands = [_line_candidate("S0", (a, b, e))]
-    index = build_od_index(cs, routes, cands, ServiceDesignSettings())
+    index = build_od_index(cs, routes, cands)
     assert index.riders == {("S0", 1): [0], ("S0", 2): [1]}
 
 
@@ -466,12 +516,16 @@ def test_od_model_puts_short_flow_on_long_train():
         Commodity(
             origin=a,
             destination=d,
-            group="manifest",
+            train_type="manifest",
             tons_per_week=1500.0,
             zone_pair=zp,
         ),
         Commodity(
-            origin=b, destination=c, group="manifest", tons_per_week=300.0, zone_pair=zp
+            origin=b,
+            destination=c,
+            train_type="manifest",
+            tons_per_week=300.0,
+            zone_pair=zp,
         ),
     ]
     routes = {
@@ -479,8 +533,10 @@ def test_od_model_puts_short_flow_on_long_train():
         (b, c): Route(path=(b, c), cost=1.0, km=100.0),
     }
     cands = [_line_candidate("S0", (a, b, c, d)), _line_candidate("S1", (b, c))]
-    settings = ServiceDesignSettings()
-    index = build_od_index(cs, routes, cands, settings)
+    settings = ServiceDesignSettings(
+        solver=SolverSettings(log_file=None)
+    )  # no log file
+    index = build_od_index(cs, routes, cands)
     sol = solve_od_model(index, settings, verbose=False)
     # Two A-D runs (capacity 2,000 per leg) carry 1,500 t A-D plus 300 t B-C; no B-C train.
     assert sol.runs_per_week == {"S0": 2}
@@ -494,34 +550,147 @@ def test_small_zone_pair_flows_counted_then_dropped():
     from railgen.schedule_gen.demand import drop_small_zone_pair_flows
 
     z1, z2, z3 = ZoneCode("001"), ZoneCode("002"), ZoneCode("003")
+    # With `shared_bulk` the bulk groups arrive as one `bulk` train type.
     by_pair = {
-        (z1, z2): {"automotive": 100.0, "manifest": 10.0},  # A 100 < 150: dropped
+        (z1, z2): {"automotive": 100.0, "manifest": 100.0},  # A 100 < 150: dropped
         (z1, z3): {"automotive": 200.0},  # A kept
-        (z2, z3): {"coal": 60.0, "grain": 50.0},  # B = 60 + 50 = 110 >= 100: kept
-        (z3, z1): {"coal": 40.0},  # B 40 < 100: dropped, zone pair disappears
+        (z2, z3): {"bulk": 110.0},  # B 110 >= 100: kept
+        (z3, z1): {"bulk": 40.0},  # B 40 < 100: dropped, zone pair disappears
     }
     settings = ServiceDesignSettings(min_od_tons_per_week={"A": 150.0, "B": 100.0})
     kept, report = drop_small_zone_pair_flows(by_pair, settings)
     assert kept == {
-        (z1, z2): {"manifest": 10.0},  # M has no minimum
+        (z1, z2): {"manifest": 100.0},  # M has no minimum
         (z1, z3): {"automotive": 200.0},
-        (z2, z3): {"coal": 60.0, "grain": 50.0},
+        (z2, z3): {"bulk": 110.0},
     }
     assert report["A"].ods_below == 1
     assert report["A"].ods_total == 2
     assert report["A"].tons_dropped == pytest.approx(100.0)
     assert report["A"].tons_total == pytest.approx(300.0)
     assert report["A"].share_dropped == pytest.approx(1 / 3)
-    # Bulk groups are summed per category before the test.
     assert report["B"].ods_below == 1
     assert report["B"].ods_total == 2
     assert report["B"].tons_dropped == pytest.approx(40.0)
 
 
+def test_without_shared_bulk_each_group_must_reach_the_minimum():
+    from railgen.schedule_gen.demand import drop_small_zone_pair_flows
+
+    z1, z2 = ZoneCode("001"), ZoneCode("002")
+    # Each B group rides its own trains, so each needs the B minimum on its own.
+    by_pair = {(z1, z2): {"coal": 20_000.0, "grain": 15_000.0, "petroleum_energy": 9.2}}
+    settings = ServiceDesignSettings(
+        shared_bulk=False, min_od_tons_per_week={"B": 20_000.0}
+    )
+    kept, report = drop_small_zone_pair_flows(by_pair, settings)
+    assert kept == {(z1, z2): {"coal": 20_000.0}}
+    assert report["B"].ods_below == 2
+    assert report["B"].ods_total == 3
+    assert report["B"].tons_dropped == pytest.approx(15_009.2)
+
+
+def test_shared_bulk_groups_are_one_train_type_and_category_b():
+    settings = ServiceDesignSettings()
+    assert {settings.train_type_of(g) for g in ("coal", "grain", "aggregates")} == {
+        "bulk"
+    }
+    assert settings.category_of("bulk") == "B"
+    assert settings.train_type_of("manifest") == "manifest"
+    unshared = ServiceDesignSettings(shared_bulk=False)
+    assert unshared.train_type_of("coal") == "coal"
+    assert unshared.category_of("coal") == "B"
+
+
+def test_empty_end_legs_are_cut_and_flows_keep_their_tons():
+    from railgen.schedule_gen.model import Solution
+    from railgen.schedule_gen.solution_to_trains import cut_empty_legs
+
+    yards = tuple(YgKey(f"Y{i}-{i}") for i in range(6))
+    service = _line_candidate("S0", yards)  # 5 legs of 100 km
+    # Freight only on legs 2-4: commodity 0 rides 2-4, commodity 1 rides 3.
+    flows = {
+        ("S0", 2, 0): 300.0,
+        ("S0", 3, 0): 300.0,
+        ("S0", 4, 0): 300.0,
+        ("S0", 3, 1): 50.0,
+    }
+    full = Solution(
+        runs_per_week={"S0": 2, "S1": 1},  # S1 carries nothing
+        on_board={},
+        pick_up={},
+        set_out={},
+        objective=0.0,
+        bound=0.0,
+        gap=0.0,
+        status="hand-written",
+        flows=flows,
+    )
+    services = {"S0": service, "S1": _line_candidate("S1", yards)}
+    solution, pieces, report = cut_empty_legs(full, services)
+    assert set(pieces) == {"S0"}
+    cut = pieces["S0"]
+    assert cut.path == yards[1:5]
+    assert cut.stop_positions == (0, 1, 2, 3)
+    assert cut.leg_km == (100.0, 100.0, 100.0)
+    assert solution.runs_per_week == {"S0": 2}
+    assert solution.flows == {
+        ("S0", 1, 0): 300.0,
+        ("S0", 2, 0): 300.0,
+        ("S0", 3, 0): 300.0,
+        ("S0", 2, 1): 50.0,
+    }
+    assert solution.pick_up == {("S0", 0): 300.0, ("S0", 1): 50.0}
+    assert solution.set_out == {("S0", 2): 50.0, ("S0", 3): 300.0}
+    assert (report.end_legs, report.middle_legs, report.services) == (2, 0, 1)
+    assert (report.added_services, report.empty_services) == (0, 1)
+    assert report.train_km_per_week == pytest.approx(2 * 200.0)
+
+
+def test_empty_middle_legs_split_the_train():
+    from railgen.schedule_gen.model import Solution
+    from railgen.schedule_gen.solution_to_trains import cut_empty_legs
+
+    yards = tuple(YgKey(f"Y{i}-{i}") for i in range(7))
+    service = _line_candidate("S0", yards)  # 6 legs of 100 km
+    # Freight on legs 1-2 (commodity 0) and 5 (commodity 1); 3, 4 and 6 are empty.
+    flows = {("S0", 1, 0): 300.0, ("S0", 2, 0): 300.0, ("S0", 5, 1): 80.0}
+    full = Solution(
+        runs_per_week={"S0": 3},
+        on_board={},
+        pick_up={},
+        set_out={},
+        objective=0.0,
+        bound=0.0,
+        gap=0.0,
+        status="hand-written",
+        flows=flows,
+    )
+    solution, pieces, report = cut_empty_legs(full, {"S0": service})
+    assert {p: s.path for p, s in pieces.items()} == {
+        "S0-1": yards[0:3],
+        "S0-2": yards[4:6],
+    }
+    assert solution.runs_per_week == {"S0-1": 3, "S0-2": 3}
+    assert solution.flows == {
+        ("S0-1", 1, 0): 300.0,
+        ("S0-1", 2, 0): 300.0,
+        ("S0-2", 1, 1): 80.0,
+    }
+    assert solution.pick_up == {("S0-1", 0): 300.0, ("S0-2", 0): 80.0}
+    assert solution.set_out == {("S0-1", 2): 300.0, ("S0-2", 1): 80.0}
+    assert (report.end_legs, report.middle_legs, report.added_services) == (1, 2, 1)
+    assert report.train_km_per_week == pytest.approx(3 * 300.0)
+
+
 def test_capacity_follows_train_category():
     settings = ServiceDesignSettings(
-        max_trailing_tons_per_run=11_000.0,
-        max_trailing_tons_per_run_by_category={"M": 30_000.0, "B": 45_000.0},
+        max_trailing_tons_per_run_by_category={
+            "A": 11_000.0,
+            "M": 30_000.0,
+            "B": 45_000.0,
+            "I": 25_000.0,
+        },
     )
     cars = settings.car_weight
     # Freight per run = max trailing tons / (1 + empty car / cargo per car).
@@ -529,9 +698,9 @@ def test_capacity_follows_train_category():
     assert settings.capacity_of("manifest") == pytest.approx(
         30_000.0 / cars.trailing_tons("M", 1.0)
     )
-    assert settings.capacity_of("automotive") == pytest.approx(  # A not listed: default
-        11_000.0 / cars.trailing_tons("A", 1.0)
-    )
+    assert settings.capacity_of("bulk") == settings.capacity_of("coal")
+    with pytest.raises(ValueError, match="missing categories"):
+        ServiceDesignSettings(max_trailing_tons_per_run_by_category={"M": 30_000.0})
     # A full run, freight plus cars, weighs exactly the limit.
     assert cars.trailing_tons("M", settings.capacity_of("manifest")) == pytest.approx(
         30_000.0
@@ -549,10 +718,18 @@ def _saved_solution_case():
     zp = (ZoneCode("001"), ZoneCode("002"))
     commodities = [
         Commodity(
-            origin=a, destination=d, group="manifest", tons_per_week=500.0, zone_pair=zp
+            origin=a,
+            destination=d,
+            train_type="manifest",
+            tons_per_week=500.0,
+            zone_pair=zp,
         ),
         Commodity(
-            origin=b, destination=c, group="manifest", tons_per_week=200.0, zone_pair=zp
+            origin=b,
+            destination=c,
+            train_type="manifest",
+            tons_per_week=200.0,
+            zone_pair=zp,
         ),
     ]
     index = OdModelIndex(
@@ -657,25 +834,22 @@ def test_every_run_solves_and_saves_in_its_own_folder(tmp_path, monkeypatch):
     ]
 
 
-def test_category_settings_keep_each_category_on_its_own_trains():
+def test_each_group_rides_only_its_own_train_type():
     from railgen.schedule_gen.solve_by_category import category_settings
 
     settings = ServiceDesignSettings()
-    m = category_settings(settings, "M", "M")
-    assert all(types == [group] for group, types in m.group_train_types.items())
-    assert m.solver.log_file == "gurobi_M.log"
+    assert settings.train_type_of("manifest") == "manifest"
+    assert settings.train_type_of("coal") == settings.train_type_of("grain") == "bulk"
+    assert settings.category_of("bulk") == "B"
+    assert settings.capacity_of("bulk") == settings.capacity_of("coal")
 
-    b = category_settings(settings, "B", "B")
-    assert b.group_train_types["coal"] == b.group_train_types["grain"] == ["bulk"]
-    assert b.group_train_types["manifest"] == ["manifest"]
-    assert b.train_type_category["bulk"] == "B"
-
-    separate = category_settings(settings, "B", "B_separate", shared_bulk=False)
-    assert separate.group_train_types["coal"] == ["coal"]
-    assert settings.group_train_types["coal"] == [
-        "coal",
-        "manifest",
-    ]  # config untouched
+    separate = settings.model_copy(update={"shared_bulk": False})
+    assert separate.train_type_of("coal") == "coal"
+    assert category_settings(settings, "M").solver.log_file == "gurobi_M.log"
+    no_log = settings.model_copy(
+        update={"solver": settings.solver.model_copy(update={"log_file": None})}
+    )
+    assert category_settings(no_log, "M").solver.log_file is None
 
 
 def test_multimodal_rows_count_on_long_zone_pairs_only():
@@ -740,7 +914,7 @@ def test_transfer_cost_stops_a_relay():
         Commodity(
             origin=p[0],
             destination=p[-1],
-            group="manifest",
+            train_type="manifest",
             tons_per_week=500.0,
             zone_pair=zp,
         )
@@ -756,9 +930,10 @@ def test_transfer_cost_stops_a_relay():
                 transfer_fixed=fixed,
                 transfer_per_ton=per_ton,
                 per_distinct_train=per_distinct_train,
-            )
+            ),
+            solver=SolverSettings(log_file=None),  # no log file
         )
-        index = build_od_index(cs, routes, cands, settings)
+        index = build_od_index(cs, routes, cands)
         sol = solve_od_model(index, settings, verbose=False)
         return sol, transfers(sol, index.services, cs)
 
@@ -803,7 +978,7 @@ def test_multimodal_is_its_own_group_and_category():
     from railgen.schedule_gen.schedule_config import INTERMODAL_GROUP
 
     settings = ServiceDesignSettings()
-    assert settings.group_train_types[INTERMODAL_GROUP] == [INTERMODAL_GROUP]
+    assert settings.train_type_of(INTERMODAL_GROUP) == INTERMODAL_GROUP
     assert settings.train_type_category[INTERMODAL_GROUP] == "I"
     assert settings.multimodal_rail_share == 0.5
 
@@ -813,7 +988,7 @@ def test_one_yard_pair_per_category_largest_pair_to_heaviest_category():
 
     size = {A1: 30.0, A2: 20.0, A3: 10.0, B1: 5.0, B2: 4.0, B3: 1.0}
     # route costs: A1-B1 100 (cheapest) ... A3-B3 300
-    cands = [(c.origin, c.dest, c.value) for c in _cands()]
+    cands = _cands()
     tons = {"B": 9000.0, "M": 5000.0, "I": 2000.0}
 
     # No tolerance: pairs ranked by size product: A1-B1 150, A1-B2 120, A2-B1 100.
@@ -824,3 +999,18 @@ def test_one_yard_pair_per_category_largest_pair_to_heaviest_category():
     # the largest pair.
     pair_of = assign_pair_per_category(cands, tons, size, distance_tolerance=0.06)
     assert pair_of == {"B": (A1, B1), "M": (A1, B2), "I": (A1, B1)}
+
+
+def test_kept_lines_split_kept_freight_by_mode_and_trade_type():
+    report = DemandReport(
+        kept_by_mode_trade={
+            (RAIL_MODE, "1"): 600.0,
+            (RAIL_MODE, "3"): 150.0,
+            (MULTIMODAL_MODE, "2"): 250.0,
+        }
+    )
+    assert kept_lines(report, ServiceDesignSettings()) == [
+        "kept after every drop: 1,000 t/week",
+        "  rail: 750 t/week (75.0%; domestic 600, import 0, export 150)",
+        "  multimodal at 50%: 250 t/week (25.0%; domestic 0, import 250, export 0)",
+    ]

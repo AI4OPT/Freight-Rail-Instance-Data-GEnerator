@@ -9,11 +9,11 @@ from pydantic.json_schema import SkipJsonSchema
 
 from railgen.models import Coord, Location, TrainCategory, YgKey
 from railgen.scenario_gen.distribution_groupings import TrainDistributions
-from railgen.scenario_gen.distributions import NormalDist, ScenarioDistribution
+from railgen.scenario_gen.distributions import ScenarioDistribution, WeibullDist
 from railgen.schedule_gen.schedule_config import CONFIGS_DIR
 
 SCENARIO_CONFIG_FILE_PATH = CONFIGS_DIR / "scenario_config.yaml"
-SCENARIO_SCHEMA_PATH = Path("schema") / "scenario_config.schema.json"
+SCENARIO_SCHEMA_FILE = "scenario_config.schema.json"
 
 _CONFIG_MODEL = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 _CONFIG_MODEL_MUTABLE = ConfigDict(frozen=False, populate_by_name=True, extra="forbid")
@@ -25,28 +25,36 @@ class ScenarioGeneralConfig(BaseModel):
         description="Value used to seed random scenario generation. Null means a fresh random seed on every run.",
     )
     scenario_count: int = Field(10, description="Number of scenarios to generate.")
-    minimum_dwell_time_minutes: int = Field(
-        30,
-        description="Minimum dwell time at a stop in minutes. If a train's simulated dwell time is less than this, it will be clamped to this value.",
+    minimum_dwell_share: float = Field(
+        0.75,
+        ge=0.0,
+        le=1.0,
+        description="Share of a stop's planned dwell that is its minimum dwell (the work); the rest is a buffer that a late train uses up to recover time.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL_MUTABLE
 
 
+def _exponential(mean: float) -> WeibullDist:
+    """Exponential distribution (Weibull with shape 1), the most common model of train delays."""
+    return WeibullDist(distr_type="weibull", shape=1.0, scale=mean)
+
+
 class Distributions(BaseModel):
-    """Each dist is either a fully defined distribution or the name of a predefined distribution."""
+    """Each dist is either a fully defined distribution or the name of a predefined distribution.
+    Defaults are exponential with illustrative means: delays only, never early."""
 
     initial_departure: ScenarioDistribution | str = Field(
-        default_factory=lambda: NormalDist(distr_type="normal", mean=0, stdev=5),
+        default_factory=lambda: _exponential(60.0),
         description="Minutes between a train's scheduled and actual first departure.",
     )
     trip_time_percent_diff: ScenarioDistribution | str = Field(
-        default_factory=lambda: NormalDist(distr_type="normal", mean=0, stdev=5),
+        default_factory=lambda: _exponential(5.0),
         description="Percentage difference between actual run time of a trip leg and its scheduled run time.",
     )
     dwell_time: ScenarioDistribution | str = Field(
-        default_factory=lambda: NormalDist(distr_type="normal", mean=0, stdev=5),
-        description="Minutes between a stop's scheduled and actual dwell time.",
+        default_factory=lambda: _exponential(15.0),
+        description="Extra dwell minutes at a stop, on top of the planned dwell less any recovery. A delay: negative draws count as 0, so a non-negative distribution is expected.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
@@ -172,27 +180,19 @@ class ScenarioGenerationConfig(BaseModel):
         return TrainDistributions(**resolved)
 
     def to_yaml(self) -> str:
-        """Serialize to YAML with schema line."""
-        body = yaml.safe_dump(
+        """Serialize to YAML: the settings a run used, saved next to its output."""
+        return yaml.safe_dump(
             self.model_dump(mode="json", by_alias=True), sort_keys=False, width=100
         )
-        return f"# yaml-language-server: $schema=../{SCENARIO_SCHEMA_PATH.as_posix()}\n\n{body}"
 
 
-def load_scenario_config(
-    path: Path | None = None,
-) -> tuple[bool, ScenarioGenerationConfig]:
+def load_scenario_config(path: Path | None = None) -> ScenarioGenerationConfig:
     """
-    Load scenario config from `path`, else `configs/scenario_config.yaml`. Falls back to defaults if not found.
-
-    Returns (config_file_found, config).
+    Load scenario config from `path`, else `configs/scenario_config.yaml`. A missing file is an error; settings the file leaves out take their code defaults.
     """
-    if path is None:
-        path = SCENARIO_CONFIG_FILE_PATH
-        if not path.is_file():
-            return False, ScenarioGenerationConfig()
-    elif not path.is_file():
+    path = path or SCENARIO_CONFIG_FILE_PATH
+    if not path.is_file():
         raise FileNotFoundError(f"Config file not found: {path}")
-    return True, ScenarioGenerationConfig.model_validate(
+    return ScenarioGenerationConfig.model_validate(
         yaml.safe_load(path.read_text()) or {}
     )

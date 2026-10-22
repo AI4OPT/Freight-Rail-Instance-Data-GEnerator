@@ -44,7 +44,6 @@ async def _batched_fetch[T](
     all_results: list[list[T]] = []
     prev_time_start: float | None = None
     waves = list(range(0, len(batches), batches_per_minute))
-    print(f"waves: {len(waves)}, batches: {len(batches)}, total: {len(coords)}")
     async with httpx.AsyncClient() as client:
         for wave_start in track(
             waves, description=get_progress_desc_with_padding(description)
@@ -156,7 +155,6 @@ async def _fetch_one_geocode(
             raise ValueError(
                 f"Geocode API returned status {resp.status_code} for {coord.lat}, {coord.lon}"
             )
-        _ = resp.raise_for_status()
         data: dict[str, object] = resp.json()
         city = str(data.get("city") or "").strip()
         subdivision_code = str(data.get("principalSubdivisionCode") or "").strip()

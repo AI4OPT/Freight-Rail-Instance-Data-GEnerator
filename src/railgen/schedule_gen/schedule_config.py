@@ -10,7 +10,8 @@ from railgen.models import Location
 CONFIG_FILE_NAME = "schedule_config.yaml"
 CONFIGS_DIR = Path("configs")
 CONFIG_FILE_PATH = CONFIGS_DIR / CONFIG_FILE_NAME
-SCHEMA_PATH = Path("schema") / "schedule_config.schema.json"
+SCHEMA_DIR = Path("schema")
+SCHEDULE_SCHEMA_FILE = "schedule_config.schema.json"
 
 _CONFIG_MODEL = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
@@ -20,22 +21,22 @@ class GeneralConfig(BaseModel):
 
     train_seed: int | None = Field(
         None,
-        description="Value used to seed random train generation. Null means a fresh random seed on every run.",
+        description="Seed for the random parts of train generation; null draws a new one each run.",
     )
     data_output_dir: str = Field(
         OUTPUT_DIR_NAME, description="Directory that generated data is written to."
     )
     seg_freq_arc_cost_discount_alpha: float = Field(
-        0.2, description="Weight of the segment-frequency discount on arc cost."
+        0.2, description="Weight α of the phase-2 discount on busy segments."
     )
     normalized_seg_arc_cost_exponent_lambda: float = Field(
         0.6,
         alias="lambda",
-        description="Exponent applied to the normalized segment frequency in the arc cost discount.",
+        description="Exponent λ of the phase-2 discount on busy segments.",
     )
     median_f: float = Field(
-        72.0,
-        description="Reference median segment frequency used to normalize the discount.",
+        12.0,
+        description="Reference count of the phase-2 discount; meant to be the median phase-1 path count over the segments used.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
@@ -65,6 +66,16 @@ def _default_hub_locations() -> list[Location]:
             ("Norfolk", "VA"),
             ("Baltimore", "MD"),
             ("Detroit", "MI"),
+            ("St. Louis", "MO"),
+            ("Omaha", "NE"),
+            ("North Platte", "NE"),
+            ("Denver", "CO"),
+            ("El Paso", "TX"),
+            ("Spokane", "WA"),
+            ("Jacksonville", "FL"),
+            ("Cincinnati", "OH"),
+            ("Buffalo", "NY"),
+            ("Laredo", "TX"),
         ]
     ]
 
@@ -74,42 +85,47 @@ class NetworkConfig(BaseModel):
 
     hub_locations: list[Location] = Field(
         default_factory=_default_hub_locations,
-        description="Locations for hub terminal yard groups.",
+        description="Hub cities that phase-1 routes run between their hub yard groups.",
+    )
+    hub_radius_km: float = Field(
+        50.0,
+        gt=0,
+        description="A hub city's hub: the largest zone yard group of its state within this many km of the city.",
     )
     ygs_per_zone: int = Field(
         3,
         ge=1,
-        description="How many yard groups represent each FAF zone. A zone's OD tonnage and its net tonnage delta are split across them, so 1 reproduces the single-yard-per-zone behaviour.",
-    )
-    max_od_fallback_km: float = Field(
-        50.0,
-        gt=0,
-        description="Fallback radius for FAF zones that match no yard group by city/state: such a zone may only be represented by yard groups within this many km of its geocoded city. A zone with nothing in range is left unrepresented rather than mapped to a distant yard group.",
+        description="Most yard groups that represent one FAF zone.",
     )
     min_od_yg_spacing_km: float = Field(
         5.0,
         ge=0,
-        description="Minimum track distance (km) between two yard groups that represent the same FAF zone: a candidate closer than this to a yard group already chosen for the zone is skipped.",
+        description="Least track distance (km) between two yard groups of the same zone.",
     )
     min_od_yg_track_km: float = Field(
         2.0,
         ge=0,
-        description="Minimum track length (km) of a yard group chosen by distance for a FAF zone that matches no yard group by city/state. Waived for a zone when no yard group within `max_od_fallback_km` has that much track.",
+        description="Least track length (km) of a zone's yard group; waived for a zone with no candidate that large.",
     )
     excluded_track_net_codes: list[str] = Field(
         default_factory=lambda: ["A", "R", "X", "T", "F"],
-        description="`NET` codes of the NTAD rail network lines that the walk between yard groups does not use: A abandoned, R abandoned and physically removed, X out of service, T trail on a former rail right-of-way, F rail ferry connection. Applied when `graph.gexf` is generated.",
+        description="NTAD `NET` codes of lines the network walk skips: A abandoned, R removed, X out of service, T trail, F ferry. Applied when `graph.gexf` is built.",
+    )
+    max_connection_km: float = Field(
+        800.0,
+        gt=0,
+        description="Longest yard-to-yard connection kept on load; longer ones are mostly routes through Canada or Mexico, which have no yards.",
     )
     od_discount_factor: float = Field(
         0.7,
-        description="OD-based routing discount: arc cost multiplier for edges adjacent to OD yard groups in Phase 1. 0.7 means 30% cheaper to route through OD yard groups.",
+        description="Phase-1 cost factor on connections at a zone yard group (0.7 = 30% cheaper).",
     )
     per_grade_speed_reduction: float = Field(
-        0.1, description="Fractional speed reduction per 1% grade."
+        0.1, description="Share of speed lost per 1% of uphill grade."
     )
     max_speed_reduction: float = Field(
         0.50,
-        description="Speed floor: never penalize below this fraction of full speed.",
+        description="Largest share of speed lost on a grade.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
@@ -118,48 +134,45 @@ class NetworkConfig(BaseModel):
 class TrainConfig(BaseModel):
     """Settings controlling train generation."""
 
-    speed_km_h: int = Field(100, description="Train speed in km/h.")
+    speed_km_h: int = Field(
+        40,
+        description="Speed (km/h) for the routing costs and the minutes of `distance_matrix.csv`; it does not change the routes.",
+    )
+    speed_km_h_by_category: dict[str, float] = Field(
+        default_factory=lambda: {"A": 40.0, "M": 36.0, "B": 38.0, "I": 50.0},
+        description="Average speed (km/h) of a train of each category between yards, delays on the line included; sets the schedule's times and crew changes.",
+    )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
 
 
-# Settings for train generation (`service_design_settings` in `config.yaml`).
+# For the `service_design_settings` blocks.
 _MODEL = ConfigDict(frozen=True, extra="forbid")
 
-# Physics of the grade requirement in `LocomotivePower`; neither is a setting.
-# Grade resistance: 1% of a 2,000-lb ton acts along a 1% grade.
+# Constants of the grade formula in `LocomotivePower`, not settings. Pull of a 1% grade: 1% of a 2,000-lb ton.
 GRADE_RESISTANCE_LB_PER_TON_PER_PERCENT = 20.0
-# 1 hp = 33,000 ft-lb per minute = 375 lb of pull at 1 mph (33,000 x 60 / 5,280).
+# 1 hp = 375 lb of pull at 1 mph (33,000 ft-lb per minute).
 LB_MPH_PER_HP = 375.0
 
 # Freight group of every FAF "multiple modes" row, whatever its commodity code.
 INTERMODAL_GROUP = "intermodal"
 
+# With `shared_bulk`, the freight groups of this category ride one train type of this name.
+BULK_CATEGORY = "B"
+SHARED_BULK_TYPE = "bulk"
 
-# FAF sctg2 code -> freight group of a rail row. Codes not listed fall into `manifest`.
+
+# SCTG2 code -> freight group; unlisted codes are manifest.
 _DEFAULT_FREIGHT_GROUPS: dict[str, list[str]] = {
     "coal": ["15"],
     "grain": ["02"],
     "ores_minerals": ["13", "14"],
     "aggregates": ["10", "11", "12"],
     "petroleum_energy": ["16", "17", "18", "19"],
-    "automotive": ["36"],
+    "automotive": ["36", "37"],
 }
 
-# Freight group -> train types it may ride (compatibility table). Bulk groups ride their
-# own bulk train type or a manifest train; vehicles ride only automotive trains.
-_DEFAULT_GROUP_TRAIN_TYPES: dict[str, list[str]] = {
-    "coal": ["coal", "manifest"],
-    "grain": ["grain", "manifest"],
-    "ores_minerals": ["ores_minerals", "manifest"],
-    "aggregates": ["aggregates", "manifest"],
-    "petroleum_energy": ["petroleum_energy", "manifest"],
-    "automotive": ["automotive"],
-    "manifest": ["manifest"],
-    INTERMODAL_GROUP: [INTERMODAL_GROUP],
-}
-
-# Train type -> category label written to the output (symbol prefix).
+# Freight group / train type -> output category (symbol prefix).
 _DEFAULT_TRAIN_TYPE_CATEGORY: dict[str, str] = {
     "coal": "B",
     "grain": "B",
@@ -173,66 +186,59 @@ _DEFAULT_TRAIN_TYPE_CATEGORY: dict[str, str] = {
 
 
 class ExcludedFlow(BaseModel):
-    """FAF rows removed from demand."""
+    """FAF rows removed from demand: origin zone, destination zone, SCTG codes, and why."""
 
     origin_zone: str
     destination_zone: str
     sctg: list[str]
-    reason: str
+    reason: str = ""
 
     model_config: ClassVar[ConfigDict] = _MODEL
-
-
-def _default_excluded_flows() -> list[ExcludedFlow]:
-    return [
-        ExcludedFlow(
-            origin_zone="261",
-            destination_zone="261",
-            sctg=["11", "12"],
-            reason=(
-                "Detroit intra-zone sand and gravel: 1.08M t/week, 28% of FAF's national "
-                "rail aggregates, about half of AAR's national total."
-            ),
-        )
-    ]
 
 
 class YardPairRule(BaseModel):
     """Which of a zone pair's candidate yard pairs carry its tons."""
 
     assignment: Literal["split_by_tonnage", "one_per_category"] = Field(
-        "split_by_tonnage",
-        description="split_by_tonnage: n = min(max_pairs, ceil(tons / tonnage_step)) yard pairs, every category split over them by yard size. one_per_category: each category of the zone pair rides one yard pair; the largest yard pair (origin track length x destination track length) goes to the category with the most tons, the next largest to the next category, and so on.",
+        "one_per_category",
+        description="split_by_tonnage: n = min(max_pairs, ceil(tons / tonnage_step)) yard pairs, each category split over them by yard size. one_per_category: one yard pair per category, the largest pair (origin x destination track) to the heaviest category.",
     )
     tonnage_step: float = Field(
         11_000.0,
-        description="split_by_tonnage only. Tons/week per extra yard pair: n = min(max_pairs, ceil(tons / tonnage_step)).",
+        description="split_by_tonnage only: tons/week per extra yard pair.",
     )
     distance_tolerance: float = Field(
         0.15,
-        description="Inter-zone: keep yard pairs whose route cost is within (1 + tolerance) x the cheapest.",
+        description="Between two zones, yard pairs whose route cost is over (1 + this) x the cheapest are left out.",
     )
     max_pairs: int = Field(3, ge=1, description="split_by_tonnage only.")
+    min_route_km: float = Field(
+        40.0,
+        ge=0,
+        description="Local-train distance (km). Inter-zone: yard pairs with a shorter route are not candidates; a zone pair with none left is dropped. Intra-zone: tons whose assigned yard pair is shorter are dropped.",
+    )
 
     model_config: ClassVar[ConfigDict] = _MODEL
 
 
 class Costs(BaseModel):
-    """Objective weights. Defaults follow the INFORMS RAS 2011 train design competition."""
+    """Objective weights."""
 
-    train_start: float = 400.0
-    per_train_mile: float = 10.0
+    train_start: float = Field(400.0, description="Cost of one run of a train.")
+    per_train_mile: float = Field(
+        10.0, description="Cost per mile of one run, over its whole route."
+    )
     per_distinct_train: float = Field(
         0.0,
-        description="Charged once a week for each candidate train that runs at all, whatever its number of runs (binary w per candidate). At 0 the model has no w variables.",
+        description="Weekly charge for each service (yard pair and train type) that runs at all. 0 leaves out its binary variables.",
     )
     transfer_fixed: float = Field(
         0.0,
-        description="Cost each time a commodity changes trains at a yard (binary z per commodity and yard).",
+        description="Cost of each change of train of a commodity at a yard.",
     )
     transfer_per_ton: float = Field(
         0.0,
-        description="Added to `transfer_fixed`, per ton/week of the commodity that changes trains. With both at 0 the model has no transfer variables.",
+        description="Added per ton/week of the commodity that changes trains. Both 0 leaves out the transfer variables.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -241,10 +247,15 @@ class Costs(BaseModel):
 class CrewRule(BaseModel):
     """Crew changes placed after the model along each selected train."""
 
-    duty_hours: float = Field(12.0, description="On-duty limit, 49 U.S.C. 21103.")
+    duty_hours: float = Field(12.0, description="On-duty limit of a crew, in hours.")
     terminal_hours: float = Field(
         0.0,
         description="On-duty time not spent running; usable hours = duty_hours - terminal_hours.",
+    )
+    merge_with_work_stop_minutes: float = Field(
+        15.0,
+        ge=0,
+        description="A crew change that falls at most this many minutes' run after a work stop is moved back to that stop.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -255,15 +266,16 @@ class CrewRule(BaseModel):
 
 
 class DwellMinutes(BaseModel):
-    """Dwell at an intermediate stop, in minutes, by the events that happen there."""
+    """Dwell at an intermediate stop, in minutes, by the events that happen there. A stop
+    with no event has no dwell."""
 
-    crew_only: float = 20.0
-    so: float = 30.0
-    pu: float = 60.0
-    pu_so: float = 90.0
-    so_crew: float = 70.0
-    pu_crew: float = 80.0
-    pu_so_crew: float = 140.0
+    crew_only: float = Field(20.0, description="Crew change only.")
+    so: float = Field(30.0, description="Set-out only.")
+    pu: float = Field(60.0, description="Pick-up only.")
+    pu_so: float = Field(90.0, description="Pick-up and set-out.")
+    so_crew: float = Field(70.0, description="Set-out and crew change.")
+    pu_crew: float = Field(80.0, description="Pick-up and crew change.")
+    pu_so_crew: float = Field(140.0, description="Pick-up, set-out and crew change.")
 
     model_config: ClassVar[ConfigDict] = _MODEL
 
@@ -282,19 +294,17 @@ class DwellMinutes(BaseModel):
 
 
 class CarWeight(BaseModel):
-    """Weight of the cars that carry a train's freight, by output category (A/M/B/I).
-
-    Demand and the schedule's tonnage are in tons of freight; locomotives pull the
-    freight and its cars, so the locomotive count uses `trailing_tons`.
-    """
+    """Car weights by category. Trailing tons = freight x (1 + empty car tons / cargo tons
+    per car); they give the locomotive count and a run's freight limit. Schedule tonnage is
+    freight, except on a circuitous train's way back (its empty cars)."""
 
     empty_car_tons_by_category: dict[str, float] = Field(
         default_factory=lambda: {"A": 53.0, "M": 33.0, "B": 29.0, "I": 31.0},
-        description="Weight of one empty car, in tons. A, M, I: medians of the auto, mixed and double-stack trains in FRA (2009), Comparative Evaluation of Rail and Truck Fuel Efficiency on Competitive Corridors, Exhibit A-1 (I: one well of a double-stack car). B: the ore car of the BNSF trains in Lustbader et al. (2025), ALTRIOS final report, Table 13. At 0 a category's tonnage is its freight alone.",
+        description="Tons of one empty car. 0 = freight only.",
     )
     cargo_tons_per_car_by_category: dict[str, float] = Field(
         default_factory=lambda: {"A": 18.0, "M": 82.5, "B": 100.0, "I": 50.0},
-        description="Freight in one loaded car, in tons. Same sources as `empty_car_tons_by_category` (I: two stacked containers).",
+        description="Tons of freight in one loaded car.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -319,19 +329,21 @@ class CarWeight(BaseModel):
 
 
 class LocomotivePower(BaseModel):
-    """Locomotives a train leg needs, from horsepower per trailing ton (hp/ton)."""
+    """Locomotives on a leg = hp per ton x trailing tons / `locomotive_hp`, rounded up.
+    hp per ton = max(category value, (`rolling_resistance_lb_per_ton` + 20 x ruling grade %)
+    x `min_speed_mph` / (375 x `transmission_efficiency`))."""
 
     locomotive_hp: float = Field(
         4400.0, gt=0, description="Horsepower of one locomotive."
     )
     hp_per_ton_by_category: dict[str, float] = Field(
         default_factory=lambda: {"A": 1.4, "M": 1.5, "B": 0.78, "I": 1.9},
-        description="Horsepower per trailing ton a train of each output category (A/M/B/I) runs with on every leg. A, I: medians of the auto and double-stack trains in FRA (2009), Comparative Evaluation of Rail and Truck Fuel Efficiency on Competitive Corridors, Exhibit A-1. M: the value calibrated to BNSF manifest trains in Lustbader et al. (2025), ALTRIOS final report, Table 15; the eight mixed trains of Exhibit A-1 have a median of 1.35 and a mean of 1.56. B: Dingler, Lai and Barkan (2014), Table 2.",
+        description="hp per trailing ton by category.",
     )
     rolling_resistance_lb_per_ton: float = Field(
         2.0,
         ge=0,
-        description="Level-track train resistance at low speed, in lb of pull per ton.",
+        description="Level-track resistance at low speed, lb per ton.",
     )
     min_speed_mph: float = Field(
         10.0, gt=0, description="Slowest speed accepted on a leg's ruling grade."
@@ -345,7 +357,7 @@ class LocomotivePower(BaseModel):
     min_grade_hop_km: float = Field(
         5.0,
         ge=0,
-        description="A hop shorter than this many km has no grade: yards a few hundred metres apart can differ by tens of metres in recorded elevation, which is not a grade a train climbs.",
+        description="Hops shorter than this (km) have no grade: elevations of nearby yards differ without a real climb.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -371,19 +383,26 @@ class LocomotivePower(BaseModel):
 
 
 class SolverSettings(BaseModel):
-    time_limit_s: float = 1800.0
-    mip_gap: float = 0.02
+    """Gurobi settings, for each category's model."""
+
+    time_limit_s: float = Field(
+        600.0,
+        description="Time limit of each category's solve (s); the best solution found is used.",
+    )
+    mip_gap: float = Field(
+        0.02,
+        description="Relative gap at which a category's solve stops.",
+    )
     log_file: str | None = Field(
         "gurobi_service_design.log",
-        description="null for console only. Otherwise each category logs to gurobi_<category>.log in the run's folder under gurobi_solutions/; the name set here is not used.",
+        description="null: console only. Otherwise each category logs to gurobi_<category>.log in the run's folder under gurobi_solutions/ (this name is not used).",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
 
 
 _DEFAULT_WEST_STATES = [
-    # The five states on the west bank of the Mississippi, Wisconsin (no CSX or NS yards),
-    # then every state west of them.
+    # West bank of the Mississippi, Wisconsin (no CSX or NS yards), and everything west.
     "MN", "IA", "MO", "AR", "LA", "WI",
     "ND", "SD", "NE", "KS", "OK", "TX",
     "MT", "WY", "CO", "NM", "ID", "UT", "AZ", "WA", "OR", "NV", "CA", "AK", "HI",
@@ -397,54 +416,53 @@ class RegionSettings(BaseModel):
 
     instance: Literal["full", "east", "west"] = Field(
         "full",
-        description="full: the whole network. east / west: flows with both ends on the side, or a gateway end and the other end on the side, are kept whole; gateway-to-gateway flows go to the side with most of their route; flows between the sides are cut where their route reaches the other side, at the near edge of a gateway area when it crosses through one (`regions.py`).",
+        description="full: the whole network. east / west: flows within the side, or between a gateway and the side, are kept whole; gateway-to-gateway flows go to the side with most of their route; crossing flows are cut where they reach the other side (`regions.py`).",
     )
     west_states: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_WEST_STATES),
-        description="States of the West: the five on the west bank of the Mississippi (MN, IA, MO, AR, LA), Wisconsin, and every state west of them. Every other state is the East.",
+        description="States of the West (west bank of the Mississippi, Wisconsin, and everything west); the rest is the East.",
     )
     gateway_zones: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_GATEWAY_ZONES),
-        description="FAF zones of the gateway cities, whose yard groups belong to both regions: Chicago (171 IL, 181 IN), St. Louis (172 IL, 292 MO), Kansas City (201 KS, 291 MO), Memphis (471), New Orleans (223).",
+        description="FAF zones of the gateway cities, in both regions: Chicago (171, 181), St. Louis (172, 292), Kansas City (201, 291), Memphis (471), New Orleans (223).",
     )
     gateway_radius_km: float = Field(
         25.0,
         gt=0,
-        description="A yard group within this many km of a yard group representing a gateway zone belongs to both regions.",
+        description="Yard groups within this many km of a gateway zone's yard group are in both regions.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
 
 
-class ReturnTrips(BaseModel):
-    """Levers that reduce the locomotive imbalance between yard groups, applied after the
-    trains of every category are built. Each adds a return trip to a train: it continues as
-    the same symbol straight back to its origin, carrying its empty cars, with the
-    locomotives of its heaviest leg. A train whose round trip does not fit in a week is
-    left as it is."""
+class CircuitousTrains(BaseModel):
+    """Trains sent straight back to their origin as the same symbol, with their empty cars and
+    the locomotives of their heaviest leg, to reduce the locomotive imbalance. Chosen one at a
+    time, the most helpful first, within each category's share; a return that does not help,
+    or does not fit in the week, is not added."""
 
-    circuitous_share: dict[str, float] = Field(
+    short_empty_returns: dict[str, float] = Field(
         default_factory=dict,
-        description="Per category (A/M/B/I): share of its trains of at most `circuitous_max_miles` (one way) that get a return trip, chosen at random with the train seed. Categories not listed get none.",
+        description="Per category, e.g. {M: 0.5}: share of its short trains (at most `short_max_miles` one way) that may come back; unlisted get none.",
     )
-    circuitous_max_miles: float = Field(
+    long_empty_returns: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per category: share of its long trains that may come back; unlisted get none.",
+    )
+    short_max_miles: float = Field(
         225.0,
         gt=0,
-        description="One-way route length, in miles, up to which a train counts as short for `circuitous_share`.",
-    )
-    empty_return_share: dict[str, float] = Field(
-        default_factory=dict,
-        description="Per category: at most this share of its trains get a return trip that brings their empty cars back, chosen one by one where it reduces the locomotives to move back the most; a return that would not reduce them is not added. Categories not listed get none.",
+        description="One-way miles up to which a train is short.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
 
     @model_validator(mode="after")
     def _check_shares(self) -> Self:
-        for name in ("circuitous_share", "empty_return_share"):
+        for name in ("short_empty_returns", "long_empty_returns"):
             if bad := {c: v for c, v in getattr(self, name).items() if not 0 <= v <= 1}:
                 raise ValueError(
-                    f"return_trips.{name} must be between 0 and 1, got {bad}"
+                    f"circuitous_trains.{name} must be between 0 and 1, got {bad}"
                 )
         return self
 
@@ -452,74 +470,75 @@ class ReturnTrips(BaseModel):
 class ServiceDesignSettings(BaseModel):
     """All knobs of the service-design generator."""
 
-    faf_year: str = Field(
-        "2022",
-        description="Year of the FAF tons column (FAF6 has 2022 only). The same year's FAF5 ton-miles give the intra-zone distances.",
-    )
     multimodal_rail_share: float = Field(
         0.5,
         ge=0.0,
         le=1.0,
-        description="Share of the tons of a FAF 'multiple modes' row that moves by rail; those tons are the intermodal freight group.",
+        description="Share of a FAF 'multiple modes' row's tons that moves by rail (the intermodal group).",
     )
     multimodal_min_miles: float = Field(
         500.0,
         ge=0.0,
-        description="A FAF 'multiple modes' row counts only when the multiple-modes freight of its zone pair travels at least this many miles on average (FAF5 ton-miles / tons of the zone pair, same year): rail carries such freight on long hauls only. Rows of zone pairs FAF5 has no distance for are dropped too. 0 counts every row.",
+        description="Multiple-modes rows count only on zone pairs averaging at least this many miles (FAF5); pairs with no FAF5 distance are dropped. 0 counts all.",
     )
     multimodal_max_miles: float = Field(
         2500.0,
         ge=0.0,
-        description="A FAF 'multiple modes' row does not count when the multiple-modes freight of its zone pair travels more than this many miles on average (FAF5, as for `multimodal_min_miles`): a move from coast to coast changes railroad on the way and is not one train. 0 is no upper limit.",
+        description="Multiple-modes rows do not count on zone pairs averaging more than this many miles (coast to coast is not one train). 0 = no limit.",
     )
     region: RegionSettings = Field(default_factory=RegionSettings)
     excluded_zones: list[str] = Field(
         default_factory=lambda: ["020"],
-        description="FAF zones whose rows are dropped, whether the zone is the origin or the destination. 020 is Alaska: its track is not connected to the rest of the network, so no distance exists between its yard groups and the others.",
+        description="FAF zones whose rows are dropped, as origin or destination. 020 Alaska: its track is not connected to the rest.",
     )
     freight_groups: dict[str, list[str]] = Field(
-        default_factory=lambda: dict(_DEFAULT_FREIGHT_GROUPS)
+        default_factory=lambda: dict(_DEFAULT_FREIGHT_GROUPS),
+        description="SCTG2 codes of each freight group (rail rows); unlisted codes are manifest, multiple-modes rows intermodal.",
     )
-    group_train_types: dict[str, list[str]] = Field(
-        default_factory=lambda: dict(_DEFAULT_GROUP_TRAIN_TYPES)
+    shared_bulk: bool = Field(
+        True,
+        description="true: the B groups of a zone pair are one flow and ride `bulk` trains; false: each group is its own flow, on its own trains (coal on coal trains, ...), and must reach `min_od_tons_per_week` alone.",
     )
     train_type_category: dict[str, str] = Field(
-        default_factory=lambda: dict(_DEFAULT_TRAIN_TYPE_CATEGORY)
+        default_factory=lambda: dict(_DEFAULT_TRAIN_TYPE_CATEGORY),
+        description="Output category (A/M/B/I, the symbol prefix) of each freight group and its train type. Each group rides only its own train type; each category is solved on its own.",
     )
-    excluded_flows: list[ExcludedFlow] = Field(default_factory=_default_excluded_flows)
+    excluded_flows: list[ExcludedFlow] = Field(
+        default_factory=list,
+        description="FAF flows left out of demand (origin zone, destination zone, SCTG codes), with a reason for the report.",
+    )
     intra_zone_min_miles: float = Field(
         25.0,
-        description="Intra-zone FAF rows with a shorter average distance are local switching. The distance comes from FAF5 (same zone, commodity and mode; else the zone's average); rows FAF5 has no distance for are kept.",
+        description="Intra-zone FAF rows averaging fewer miles (FAF5) are local switching and dropped; rows with no FAF5 distance are kept.",
     )
     min_od_tons_per_week: dict[str, float] = Field(
-        default_factory=lambda: {"A": 150.0},
-        description="Per output category (A/M/B/I): a zone pair's flow of that category below this many tons/week is dropped, before the zone pair is split over yard pairs. Categories not listed keep every flow.",
+        default_factory=lambda: {"A": 3000.0, "M": 15000.0, "B": 20000.0, "I": 8000.0},
+        description="Per category: a train type's tons/week on a zone pair below this are dropped, before the yard-pair split (without `shared_bulk`, each B group on its own); unlisted categories keep all.",
     )
     yard_pairs: YardPairRule = Field(default_factory=YardPairRule)
     work_yards_per_state: int = Field(
         3,
         ge=0,
-        description="Besides zone yards, the N largest yard groups per state (inclusive of zone yards) may host work events.",
-    )
-    max_trailing_tons_per_run: float = Field(
-        11_000.0,
-        description="Max weight of one train run on any leg: freight plus the cars that carry it (trailing tons; RAS 2011 median link limit). Used for a category not listed in `max_trailing_tons_per_run_by_category`.",
+        description="Besides zone yards, the N largest yard groups per state may host work events.",
     )
     max_trailing_tons_per_run_by_category: dict[str, float] = Field(
-        default_factory=dict,
-        description="Max weight of one train run on any leg, per output category (A/M/B/I): freight plus the cars that carry it (trailing tons). The freight a run may carry is this divided by (1 + empty car tons / cargo tons per car) of `car_weight`. Categories not listed use `max_trailing_tons_per_run`.",
+        default_factory=lambda: {"A": 6500.0, "M": 13000.0, "B": 17000.0, "I": 12000.0},
+        description="Max trailing tons (freight + cars) of a run on any leg, by category; the freight limit is this / (1 + empty car tons / cargo tons per car).",
     )
-    max_runs_per_week: int = 7
+    max_runs_per_week: int = Field(
+        7,
+        description="Most runs a week of one symbol (one a day); a service's runs are split into symbols of this many.",
+    )
     max_symbols_per_service: int = Field(
         3,
-        description="A route may run as up to this many parallel symbols (y <= 7 x this).",
+        description="Most parallel symbols of one service; its runs a week are at most max_runs_per_week x max_symbols_per_service, or more if its own freight needs more.",
     )
     costs: Costs = Field(default_factory=Costs)
     crew: CrewRule = Field(default_factory=CrewRule)
     dwell_minutes: DwellMinutes = Field(default_factory=DwellMinutes)
     car_weight: CarWeight = Field(default_factory=CarWeight)
     locomotive_power: LocomotivePower = Field(default_factory=LocomotivePower)
-    return_trips: ReturnTrips = Field(default_factory=ReturnTrips)
+    circuitous_trains: CircuitousTrains = Field(default_factory=CircuitousTrains)
     solver: SolverSettings = Field(default_factory=SolverSettings)
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -534,6 +553,31 @@ class ServiceDesignSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _check_circuitous_train_categories(self) -> Self:
+        categories = set(self.train_type_category.values())
+        for name in ("short_empty_returns", "long_empty_returns"):
+            if unknown := set(getattr(self.circuitous_trains, name)) - categories:
+                raise ValueError(
+                    f"circuitous_trains.{name} has categories {sorted(unknown)} that no train type "
+                    f"has (train_type_category: {sorted(categories)})"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _check_trailing_ton_categories(self) -> Self:
+        categories = set(self.train_type_category.values())
+        listed = self.max_trailing_tons_per_run_by_category
+        if missing := categories - set(listed):
+            raise ValueError(
+                f"max_trailing_tons_per_run_by_category is missing categories {sorted(missing)}"
+            )
+        if low := {c: v for c, v in listed.items() if v <= 0}:
+            raise ValueError(
+                f"max_trailing_tons_per_run_by_category must be > 0, got {low}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _check_car_weight_categories(self) -> Self:
         categories = set(self.train_type_category.values())
         for name in ("empty_car_tons_by_category", "cargo_tons_per_car_by_category"):
@@ -543,15 +587,24 @@ class ServiceDesignSettings(BaseModel):
                 )
         return self
 
+    def train_type_of(self, group: str) -> str:
+        """The train type a freight group rides: its own, or the shared `bulk` type for the
+        bulk groups with `shared_bulk`. Freight never rides a train of another type."""
+        if self.shared_bulk and self.train_type_category.get(group) == BULK_CATEGORY:
+            return SHARED_BULK_TYPE
+        return group
+
+    def category_of(self, train_type: str) -> str:
+        """Output category of a train type."""
+        if train_type == SHARED_BULK_TYPE:
+            return BULK_CATEGORY
+        return self.train_type_category[train_type]
+
     def capacity_of(self, train_type: str) -> float:
         """Max tons of freight per run of a train type: the freight whose trailing tons
-        (freight plus its cars) equal the category's limit, else the default's."""
-        category = self.train_type_category.get(train_type)
-        if category is None:
-            return self.max_trailing_tons_per_run
-        trailing = self.max_trailing_tons_per_run_by_category.get(
-            category, self.max_trailing_tons_per_run
-        )
+        (freight plus its cars) equal the category's limit."""
+        category = self.category_of(train_type)
+        trailing = self.max_trailing_tons_per_run_by_category[category]
         return trailing / self.car_weight.trailing_tons(category, 1.0)
 
     def group_of(self, sctg: str) -> str:
@@ -575,24 +628,30 @@ class Config(BaseModel):
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
 
+    @model_validator(mode="after")
+    def _check_speed_categories(self) -> Self:
+        categories = set(self.service_design_settings.train_type_category.values())
+        listed = self.train_settings.speed_km_h_by_category
+        if missing := categories - set(listed):
+            raise ValueError(
+                f"train_settings.speed_km_h_by_category is missing categories {sorted(missing)}"
+            )
+        if low := {c: v for c, v in listed.items() if v <= 0}:
+            raise ValueError(
+                f"train_settings.speed_km_h_by_category must be > 0, got {low}"
+            )
+        return self
+
     def to_yaml(self) -> str:
-        """Serialize to YAML with schema line."""
-        body = yaml.safe_dump(
+        """Serialize to YAML: the settings a run used, saved next to its output."""
+        return yaml.safe_dump(
             self.model_dump(mode="json", by_alias=True), sort_keys=False, width=100
         )
-        return f"# yaml-language-server: $schema=../{SCHEMA_PATH.as_posix()}\n\n{body}"
 
 
-def load_config(path: Path | None = None) -> tuple[bool, Config]:
-    """
-    Load config from `path`, else `CONFIG_FILE_PATH` (defaults if that's missing).
-
-    Returns (config_file_found, config).
-    """
-    if path is None:
-        path = CONFIG_FILE_PATH
-        if not path.is_file():
-            return False, Config()
-    elif not path.is_file():
+def load_config(path: Path | None = None) -> Config:
+    """Load config from `path`, else `CONFIG_FILE_PATH`. Raises if file not found."""
+    path = path or CONFIG_FILE_PATH
+    if not path.is_file():
         raise FileNotFoundError(f"Config file not found: {path}")
-    return True, Config.model_validate(yaml.safe_load(path.read_text()) or {})
+    return Config.model_validate(yaml.safe_load(path.read_text()) or {})

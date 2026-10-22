@@ -10,8 +10,8 @@ class YardGroupReason:
     pick_up: bool
     set_out: bool
     crew_change: bool
-    pu_amount: float = 0.0
-    so_amount: float = 0.0
+    pu_amount: float = 0.0  # tons of freight picked up per run
+    so_amount: float = 0.0  # tons set out per run
 
 
 @dataclass(frozen=True, kw_only=True)

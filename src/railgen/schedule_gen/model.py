@@ -54,36 +54,24 @@ class ModelSize:
         return self.capacity_rows + self.balance_rows
 
 
-def _accepts(settings: ServiceDesignSettings) -> dict[str, set[str]]:
-    """Train type -> freight groups it may carry."""
-    out: dict[str, set[str]] = defaultdict(set)
-    for group, types in settings.group_train_types.items():
-        for t in types:
-            out[t].add(group)
-    return out
-
-
 def build_od_index(
     commodities: list[Commodity],
     routes: dict[tuple[YgKey, YgKey], Route],
     candidates: list[CandidateService],
-    settings: ServiceDesignSettings,
 ) -> OdModelIndex:
     arc_users: dict[Arc, set[int]] = defaultdict(set)
-    pair_group_tons: dict[tuple[YgKey, YgKey], dict[str, float]] = defaultdict(
+    pair_type_tons: dict[tuple[YgKey, YgKey], dict[str, float]] = defaultdict(
         lambda: defaultdict(float)
     )
     for k, c in enumerate(commodities):
-        pair_group_tons[(c.origin, c.destination)][c.group] += c.tons_per_week
+        pair_type_tons[(c.origin, c.destination)][c.train_type] += c.tons_per_week
         for arc in pairwise(routes[(c.origin, c.destination)].path):
             arc_users[arc].add(k)
 
-    accepts = _accepts(settings)
     riders: dict[Leg, list[int]] = {}
     own_tons: dict[str, float] = {}
     for s in candidates:
-        own = pair_group_tons.get((s.path[0], s.path[-1]), {})
-        own_tons[s.id] = sum(t for g, t in own.items() if g in accepts[s.train_type])
+        own_tons[s.id] = pair_type_tons[(s.path[0], s.path[-1])].get(s.train_type, 0.0)
         for i, (a, b) in enumerate(pairwise(s.stop_positions), start=1):
             arcs = list(pairwise(s.path[a : b + 1]))
             users = set(arc_users.get(arcs[0], ()))
@@ -91,9 +79,7 @@ def build_od_index(
                 if not users:
                     break
                 users &= arc_users.get(arc, set())
-            ks = sorted(
-                k for k in users if commodities[k].group in accepts[s.train_type]
-            )
+            ks = sorted(k for k in users if commodities[k].train_type == s.train_type)
             if ks:
                 riders[(s.id, i)] = ks
 
@@ -106,7 +92,7 @@ def build_od_index(
 
 
 def model_size(index: OdModelIndex) -> ModelSize:
-    """Size of the model `solve_od_model` would build, without building it."""
+    """Size of the model `solve_od_model` (without building it)."""
     balance: set[tuple[int, YgKey]] = set()
     for (sid, i), ks in index.riders.items():
         stops = index.services[sid].stops
@@ -191,7 +177,7 @@ def solve_od_model(
                     name=f"transfer[{sid},{i},{k}]",
                 )
 
-    for k, c in enumerate(index.commodities):  # make sure both ends get a row
+    for k, c in enumerate(index.commodities):
         _ = balance[(k, c.origin)]
         _ = balance[(k, c.destination)]
     for (k, yard), expr in balance.items():

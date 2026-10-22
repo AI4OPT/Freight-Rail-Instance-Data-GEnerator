@@ -16,9 +16,9 @@ from pydantic import ValidationError
 from rich.progress import track
 
 from railgen.constants import (
-    FAF_ZONE_COORDS_FILE,
     FORWARD_GEOCODE_MIN_INTERVAL_S,
     GRAPH_FILE,
+    HUB_COORDS_FILE,
     HUB_DOWNLOAD_URL,
     HUB_EXPORT_POLL_S,
     HUB_EXPORT_TIMEOUT_S,
@@ -30,14 +30,14 @@ from railgen.constants import (
     YARD_GROUPS_FILE,
     YARD_GROUPS_ITEM_ID,
     YARD_RECORDS_FILE,
-    ZONE_YARD_GROUPS_FILE,
 )
 from railgen.constants import INPUT_DATA_DIR as PUBLIC_DIR
 from railgen.constants import RAIL_NETWORK_DIR as GRAPH_DIR
 from railgen.faf_data import (
-    FAF_LOCATION_LOOKUP,
     FAF_OD_ZONE_CODES,
-    FAF_ZONE_LOOKUP,
+    FAF_ZONE_NAMES,
+    FAF_ZONES,
+    faf_zone_of,
 )
 from railgen.models import (
     Coord,
@@ -61,7 +61,7 @@ from railgen.rail_network_gen.graph_utils import (
     get_yg_coord,
 )
 from railgen.schedule_gen.schedule_config import Config, load_config
-from railgen.stats import OdAssignmentStats, OdPassStats
+from railgen.stats import OdAssignmentStats
 from railgen.utils import get_progress_desc_with_padding
 
 YG_CHANGES_PATH = Path(__file__).parent / YARD_GROUP_CHANGES_FILE
@@ -79,18 +79,6 @@ def _calc_shape_length_km(geom: LineStringGeometry | MultiLineStringGeometry) ->
                 haversine((p1[1], p1[0]), (p2[1], p2[0]), unit=Unit.KILOMETERS)
             )
     return total
-
-
-def _find_zone_code(city: str, state: str) -> ZoneCode | None:
-    """Return the FAF numeric zone code for a given city/state, or None if no match."""
-    for zone, code in FAF_ZONE_LOOKUP.load().items():
-        if zone.matches(city, state):
-            return code
-    return None
-
-
-def _haversine_km(a: "Coord", b: "Coord") -> float:
-    return float(haversine((a.lat, a.lon), (b.lat, b.lon), unit=Unit.KILOMETERS))
 
 
 def _never_too_close(_yg_1: YgKey, _yg_2: YgKey) -> bool:
@@ -137,111 +125,66 @@ def _with_min_track(
     return large or candidates
 
 
-def _zone_city_coords(
-    codes: list[ZoneCode], code_to_faf_zone: dict[ZoneCode, Location]
-) -> dict[ZoneCode, Coord]:
-    """Geocoded city of each zone, from `FAF_ZONE_COORDS_FILE`. Zones missing from the file get looked up and added."""
-    path = GRAPH_DIR / FAF_ZONE_COORDS_FILE
+def hub_label(hub: Location) -> str:
+    return f"{hub.raw_city}, {hub.state_code}"
+
+
+def hub_city_coords(hubs: list[Location]) -> dict[str, Coord]:
+    """Geocoded coordinates of the hub cities by `hub_label`, from `HUB_COORDS_FILE`."""
+    path = GRAPH_DIR / HUB_COORDS_FILE
     saved: dict[str, dict[str, float]] = (
         json.loads(path.read_text()) if path.exists() else {}
     )
-    missing = [code for code in codes if code not in saved]
-    for code in missing:
-        faf_zone = code_to_faf_zone[code]
-        coord = forward_geocode(faf_zone.raw_city, faf_zone.state_code)
+    missing = [hub for hub in hubs if hub_label(hub) not in saved]
+    for hub in missing:
+        coord = forward_geocode(hub.raw_city, hub.state_code)
         time.sleep(FORWARD_GEOCODE_MIN_INTERVAL_S)  # respect Nominatim rate limit
         if coord is not None:
-            saved[code] = {"lat": coord.lat, "lon": coord.lon}
+            saved[hub_label(hub)] = {"lat": coord.lat, "lon": coord.lon}
     if missing:
+        GRAPH_DIR.mkdir(exist_ok=True)
         _ = path.write_text(json.dumps(saved, indent=2, sort_keys=True) + "\n")
     return {
-        code: Coord(lat=saved[code]["lat"], lon=saved[code]["lon"])
-        for code in codes
-        if code in saved
+        label: Coord(lat=saved[label]["lat"], lon=saved[label]["lon"])
+        for label in map(hub_label, hubs)
+        if label in saved
     }
 
 
-def _assign_nearest_ygs_for_real_city_zones(
-    ygs_dict: dict[YgKey, YardGroup],
-    codes: list[ZoneCode],
-    code_to_faf_zone: dict[ZoneCode, Location],
-    used_ygs: set[YgKey],
-    assign: Callable[[ZoneCode, list[YgKey]], None],
-    *,
-    ygs_per_zone: int,
-    max_fallback_km: float,
-    min_track_km: float = 0.0,
-    too_close: Callable[[YgKey, YgKey], bool] = _never_too_close,
-    barred: AbstractSet[YgKey] = frozenset(),
-) -> None:
-    """Fallback for city zones that matched no yard group by city/state.
+def _yg_zone_codes(ygs: dict[YgKey, YardGroup]) -> dict[YgKey, ZoneCode | None]:
+    """FAF zone each YardGroup lies in, by the zone boundaries (`faf_zone_of`), or None."""
+    zones = FAF_ZONES.load()
+    return {name: faf_zone_of(yg.coord, zones) for name, yg in ygs.items()}
 
-    Geocode the zone's city and take up to `ygs_per_zone` of the nearest free,
-    unbarred yard groups within `max_fallback_km`, preferring ones with at least
-    `min_track_km` of track and skipping any `too_close` to one already picked.
 
-    Without the distance cap this would happily pick yards hundreds of km away, so a
-    zone with nothing in range just stays unrepresented.
-    """
-    zone_coords = _zone_city_coords(codes, code_to_faf_zone)
-    for code in codes:
-        zone_coord = zone_coords.get(code)
-        if zone_coord is None:  # the zone city could not be geocoded
+def _zone_members(
+    yg_zone_codes: dict[YgKey, ZoneCode | None], barred: AbstractSet[YgKey]
+) -> dict[ZoneCode, list[YgKey]]:
+    """YardGroups inside each FAF zone that sends or receives rail or multimodal freight, barred ones left out."""
+    members: dict[ZoneCode, list[YgKey]] = {}
+    for yg_key, code in yg_zone_codes.items():
+        if code is None or code not in FAF_OD_ZONE_CODES.load() or yg_key in barred:
             continue
-        in_range = sorted(
-            (
-                (name, dist)
-                for name, yg in ygs_dict.items()
-                if name not in used_ygs
-                and name not in barred
-                and (dist := _haversine_km(zone_coord, yg.coord)) <= max_fallback_km
-            ),
-            key=lambda pair: pair[1],
-        )
-        chosen = _spaced(
-            _with_min_track([name for name, _ in in_range], ygs_dict, min_track_km),
-            ygs_per_zone,
-            too_close,
-        )
-        assign(code, chosen)
+        members.setdefault(code, []).append(yg_key)
+    return members
 
 
-def _assign_largest_ygs_for_rest_of_zones(
-    ygs_dict: dict[YgKey, YardGroup],
-    codes: list[ZoneCode],
-    code_to_city_state: dict[ZoneCode, Location],
-    used_ygs: set[YgKey],
-    assign: Callable[[ZoneCode, list[YgKey]], None],
-    *,
-    ygs_per_zone: int,
-    named_zone_ygs: set[YgKey],
-    too_close: Callable[[YgKey, YgKey], bool] = _never_too_close,
-    barred: AbstractSet[YgKey] = frozenset(),
-) -> None:
-    """Fallback for "Rest of <state>" zones: the `ygs_per_zone` largest free yard groups in the state.
-
-    Skips `named_zone_ygs` (yards in a city that has its own zone, like Detroit).
-    Otherwise the biggest yards, which sit in the big metros, would end up representing
-    the rest of the state. No distance cap since these zones have no center.
-    """
-    ygs_by_state: dict[str, list[YgKey]] = {}
-    for name, yg in ygs_dict.items():
-        if yg.state:
-            ygs_by_state.setdefault(yg.state.upper(), []).append(name)
-
-    for code in codes:
-        faf_zone = code_to_city_state[code]
-        candidates = [
-            n
-            for n in ygs_by_state.get(faf_zone.state_code, [])
-            if n not in used_ygs and n not in named_zone_ygs and n not in barred
-        ]
-        best = _spaced(
-            sorted(candidates, key=lambda n: ygs_dict[n].shape_length_km, reverse=True),
-            ygs_per_zone,
-            too_close,
-        )
-        assign(code, best)
+def _od_assignment_summary(
+    assigned: dict[ZoneCode, list[YgKey]], *, ygs_per_zone: int
+) -> OdAssignmentStats:
+    """Stats of the YardGroups `assigned` to each zone, over the zones with rail or multimodal freight."""
+    zones = FAF_OD_ZONE_CODES.load()
+    represented = {code: ygs for code, ygs in assigned.items() if ygs}
+    return OdAssignmentStats(
+        ygs_per_zone=ygs_per_zone,
+        zones_total=len(zones),
+        zones_represented=len(represented),
+        zones_unrepresented=sorted(c for c in zones if c not in represented),
+        zones_under_target=sum(
+            1 for ygs in represented.values() if len(ygs) < ygs_per_zone
+        ),
+        yard_groups_designated=sum(len(ygs) for ygs in represented.values()),
+    )
 
 
 def _assign_od_yard_groups(
@@ -249,219 +192,94 @@ def _assign_od_yard_groups(
     yg_zone_codes: dict[YgKey, ZoneCode | None],
     *,
     ygs_per_zone: int,
-    max_fallback_km: float,
     min_spacing_km: float = 0.0,
     min_track_km: float = 0.0,
     graph: Graph | None = None,
     barred: AbstractSet[YgKey] = frozenset(),
-) -> tuple[OdAssignmentStats, dict[ZoneCode, tuple[int, list[YgKey]]]]:
-    """Pick up to `ygs_per_zone` yard groups to represent each FAF zone, in three passes:
+) -> OdAssignmentStats:
+    """Pick up to `ygs_per_zone` yard groups to represent each FAF zone: the largest yard groups inside it.
 
-    1. City/state match: the largest matching yard groups.
-    2. City zones with no match: the nearest yard groups to the geocoded city
-       (`_assign_nearest_ygs_for_real_city_zones`).
-    3. "Rest of <state>" zones: the largest leftover yard groups in the state
-       (`_assign_largest_ygs_for_rest_of_zones`).
+    Barred yard groups are never picked, yard groups with at least `min_track_km` of track
+    come first (a zone with none that large takes smaller ones), and picks for the same
+    zone have to be at least `min_spacing_km` apart by track. A zone with no yard group
+    inside stays unrepresented.
 
-    Barred yard groups are never picked, and picks for the same zone have to be at
-    least `min_spacing_km` apart by track (skipped without a graph). A zone can end up
-    with fewer yard groups, or none. Better than a yard that doesn't really represent it.
-
-    Sets `od_zone_code` on the chosen YardGroups in place. Returns per-pass stats and,
-    per zone, the pass that handled it and its yard groups.
+    Sets `od_zone_code` on the chosen YardGroups in place. Returns the stats.
     """
-    zone_to_ygs: dict[ZoneCode, list[YgKey]] = {}
-    for yg_key, code in yg_zone_codes.items():
-        if code is None or code not in FAF_OD_ZONE_CODES.load() or yg_key in barred:
-            continue
-        zone_to_ygs.setdefault(code, []).append(yg_key)
     too_close = (
         _track_closeness(graph, min_spacing_km)
         if graph is not None and min_spacing_km > 0
         else _never_too_close
     )
-
-    # Reset everyone first; only the chosen YG per zone is set as OD below.
     for yg in ygs_dict.values():
         yg.od_zone_code = None
 
-    used_ygs: set[YgKey] = set()
     assigned: dict[ZoneCode, list[YgKey]] = {}
-
-    def assign(code: ZoneCode, yg_keys: list[YgKey]) -> None:
-        """Hand a zone to its yard groups."""
-        if not yg_keys:
-            return
-        for yg_key in yg_keys:
-            yg = ygs_dict[yg_key]
-            # A yard group only represents one zone. Downstream relies on this to
-            # keep inter-zone flows from ending up with origin == destination.
-            assert yg.od_zone_code is None, (
-                f"{yg_key} already represents zone {yg.od_zone_code}, "
-                f"cannot also represent zone {code}."
-            )
-            yg.od_zone_code = code
-            used_ygs.add(yg_key)
-        assigned.setdefault(code, []).extend(yg_keys)
-
-    # Pass 1: the largest city/state-matched YGs per zone.
-    for code, yg_names in zone_to_ygs.items():
-        best = _spaced(
-            sorted(yg_names, key=lambda n: ygs_dict[n].shape_length_km, reverse=True),
+    for code, yg_names in _zone_members(yg_zone_codes, barred).items():
+        largest_first = sorted(
+            yg_names, key=lambda n: ygs_dict[n].shape_length_km, reverse=True
+        )
+        assigned[code] = _spaced(
+            _with_min_track(largest_first, ygs_dict, min_track_km),
             ygs_per_zone,
             too_close,
         )
-        assign(code, best)
+        for yg_key in assigned[code]:
+            ygs_dict[yg_key].od_zone_code = code
 
-    # Passes 2 and 3: fall back for OD zones that matched no yard group above.
-    unmatched = [
-        code
-        for code in sorted(FAF_OD_ZONE_CODES.load())
-        if code not in zone_to_ygs and code in FAF_LOCATION_LOOKUP.load()
-    ]
-    rest_of_codes = [
-        c
-        for c in unmatched
-        if FAF_LOCATION_LOOKUP.load()[c].normalized_city.startswith("rest of")
-    ]
-    real_city_codes = [
-        c
-        for c in unmatched
-        if not FAF_LOCATION_LOOKUP.load()[c].normalized_city.startswith("rest of")
-    ]
-
-    _assign_nearest_ygs_for_real_city_zones(
-        ygs_dict,
-        real_city_codes,
-        FAF_LOCATION_LOOKUP.load(),
-        used_ygs,
-        assign,
-        ygs_per_zone=ygs_per_zone,
-        max_fallback_km=max_fallback_km,
-        min_track_km=min_track_km,
-        too_close=too_close,
-        barred=barred,
-    )
-    _assign_largest_ygs_for_rest_of_zones(
-        ygs_dict,
-        rest_of_codes,
-        FAF_LOCATION_LOOKUP.load(),
-        used_ygs,
-        assign,
-        ygs_per_zone=ygs_per_zone,
-        # Yards in a named zone's city belong to that zone, not the rest of the state.
-        named_zone_ygs={n for n, c in yg_zone_codes.items() if c is not None},
-        too_close=too_close,
-        barred=barred,
-    )
-
-    def tally(codes: Iterable[ZoneCode]) -> OdPassStats:
-        handled = [c for c in codes if c in assigned]
-        return OdPassStats(
-            zones=len(handled),
-            yard_groups=sum(len(assigned[c]) for c in handled),
-            zones_under_target=sum(
-                1 for c in handled if len(assigned[c]) < ygs_per_zone
-            ),
-        )
-
-    targeted = [*zone_to_ygs, *real_city_codes, *rest_of_codes]
-    summary = OdAssignmentStats(
-        ygs_per_zone=ygs_per_zone,
-        max_fallback_km=max_fallback_km,
-        zones_total=len(targeted),
-        zones_represented=len(assigned),
-        zones_unrepresented=sorted(c for c in targeted if c not in assigned),
-        yard_groups_designated=sum(len(v) for v in assigned.values()),
-        city_match=tally(zone_to_ygs),
-        nearest_within_radius=tally(real_city_codes),
-        rest_of_state=tally(rest_of_codes),
-    )
+    summary = _od_assignment_summary(assigned, ygs_per_zone=ygs_per_zone)
     summary.print_summary()
-    chosen = {
-        code: (zone_pass, assigned.get(code, []))
-        for zone_pass, codes in enumerate(
-            (zone_to_ygs, real_city_codes, rest_of_codes), start=1
-        )
-        for code in codes
-    }
-    return summary, chosen
+    return summary
 
 
-_TEX_ESCAPES = {
-    "\\": r"\textbackslash{}",
-    "&": r"\&",
-    "%": r"\%",
-    "$": r"\$",
-    "#": r"\#",
-    "_": r"\_",
-    "{": r"\{",
-    "}": r"\}",
-    "~": r"\textasciitilde{}",
-    "^": r"\textasciicircum{}",
-}
-
-
-def _zone_yard_groups_table(
-    rows: list[tuple[str, str, int, list[tuple[str, float]]]],
-) -> str:
-    """LaTeX table of each zone's yard groups, from rows of (zone code, zone name, pass, [(yard group, track km)])."""
-
-    def tex(text: str) -> str:
-        return "".join(_TEX_ESCAPES.get(char, char) for char in text)
-
-    header = "Zone & City & Stage & Yard groups (km of track) \\\\"
-    lines = [
-        "% Yard groups that represent each FAF zone. Written when the yard groups are generated (assign_od_yard_groups); do not edit.",
-        "% Requires: longtable, booktabs.",
-        "\\begin{longtable}{@{}l l c p{9cm}@{}}",
-        "\\caption{Yard groups representing each FAF zone.}\\label{tab:zone-yard-groups}\\\\",
-        "\\toprule",
-        header,
-        "\\midrule",
-        "\\endfirsthead",
-        "\\toprule",
-        header,
-        "\\midrule",
-        "\\endhead",
-        "\\bottomrule",
-        "\\endfoot",
-    ]
-    for code, name, zone_pass, yards in rows:
-        chosen = "; ".join(f"{tex(yg)} ({km:.1f})" for yg, km in yards) or "none"
-        lines.append(f"{tex(code)} & {tex(name)} & {zone_pass} & {chosen} \\\\")
-    lines.append("\\end{longtable}")
-    return "\n".join(lines) + "\n"
-
-
-def _save_zone_yard_groups(
-    ygs: dict[YgKey, YardGroup], chosen: dict[ZoneCode, tuple[int, list[YgKey]]]
+def write_zone_yard_groups(
+    ygs: dict[YgKey, YardGroup], hubs: dict[str, YgKey | None], path: Path
 ) -> None:
-    """Write the zone table to `ZONE_YARD_GROUPS_FILE`, only if it changed."""
-    zones = FAF_LOCATION_LOOKUP.load()
-    rows: list[tuple[str, str, int, list[tuple[str, float]]]] = []
-    for code in sorted(chosen):
-        zone_pass, names = chosen[code]
-        zone = zones[code]
-        zone_name = (
-            f"Rest of {zone.state_code}"
-            if zone.normalized_city.startswith("rest of")
-            else f"{zone.raw_city.title()}, {zone.state_code}"
+    """
+    Write the YardGroups that represent each FAF zone with rail or multimodal freight to a CSV, largest first; a zone with none gets one row with no yard group. `hub_city` names the hub cities whose hub the YardGroup is.
+
+    ## Args:
+    - ygs -- YardGroups by name, with their zones assigned
+    - hubs -- hub YardGroup of each hub city (`RailNetwork.hub_yard_groups_by_city`)
+    - path -- the CSV to write
+    """
+    assigned: dict[ZoneCode, list[YgKey]] = {}
+    for name, yg in ygs.items():
+        if yg.od_zone_code is not None:
+            assigned.setdefault(yg.od_zone_code, []).append(name)
+    hub_cities: dict[YgKey, list[str]] = {}
+    for city, key in hubs.items():
+        if key is not None:
+            hub_cities.setdefault(key, []).append(city)
+    zone_names = FAF_ZONE_NAMES.load()
+    rows: list[tuple[ZoneCode, str, str, str, str]] = []
+    for code in sorted(FAF_OD_ZONE_CODES.load()):
+        names = sorted(
+            assigned.get(code, []), key=lambda n: ygs[n].shape_length_km, reverse=True
         )
-        rows.append(
-            (code, zone_name, zone_pass, [(n, ygs[n].shape_length_km) for n in names])
+        rows += [
+            (
+                code,
+                zone_names[code],
+                n,
+                f"{ygs[n].shape_length_km:.1f}",
+                "; ".join(hub_cities.get(n, [])),
+            )
+            for n in names
+        ] or [(code, zone_names[code], "", "", "")]
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            ["zone_code", "zone_name", "yard_group", "track_km", "hub_city"]
         )
-    table = _zone_yard_groups_table(rows)
-    path = GRAPH_DIR / ZONE_YARD_GROUPS_FILE
-    if not path.exists() or path.read_text() != table:
-        _ = path.write_text(table)
+        writer.writerows(rows)
 
 
 def assign_od_yard_groups(
     ygs: dict[YgKey, YardGroup], graph: Graph, cfg: Config, barred: AbstractSet[YgKey]
 ) -> OdAssignmentStats:
     """
-    Pick the YardGroups that represent each FAF zone (rules in `_assign_od_yard_groups`) and write the zone table.
+    Pick the YardGroups that represent each FAF zone (rules in `_assign_od_yard_groups`).
 
     ## Args:
     - ygs -- YardGroups by name; updated in place
@@ -470,24 +288,38 @@ def assign_od_yard_groups(
     - barred -- YardGroups that can't represent a zone
 
     ## Returns:
-    - Per-pass stats.
+    - The stats.
     """
     net = cfg.network_settings
-    stats, chosen = _assign_od_yard_groups(
+    return _assign_od_yard_groups(
         ygs,
-        {
-            name: _find_zone_code(yg.city, yg.state) if yg.city and yg.state else None
-            for name, yg in ygs.items()
-        },
+        _yg_zone_codes(ygs),
         ygs_per_zone=net.ygs_per_zone,
-        max_fallback_km=net.max_od_fallback_km,
         min_spacing_km=net.min_od_yg_spacing_km,
         min_track_km=net.min_od_yg_track_km,
         graph=graph,
         barred=barred,
     )
-    _save_zone_yard_groups(ygs, chosen)
-    return stats
+
+
+def od_assignment_stats(ygs: dict[YgKey, YardGroup], cfg: Config) -> OdAssignmentStats:
+    """
+    Stats of a saved YardGroup dict, recounted from its `od_zone_code`s.
+
+    ## Args:
+    - ygs -- YardGroups by name, with their zones assigned
+    - cfg -- Config (`network_settings`)
+
+    ## Returns:
+    - The stats, as `assign_od_yard_groups` returns them.
+    """
+    assigned: dict[ZoneCode, list[YgKey]] = {}
+    for name, yg in ygs.items():
+        if yg.od_zone_code is not None:
+            assigned.setdefault(yg.od_zone_code, []).append(name)
+    return _od_assignment_summary(
+        assigned, ygs_per_zone=cfg.network_settings.ygs_per_zone
+    )
 
 
 def _kept_name(name: YgKey, merges: dict[YgKey, YgKey]) -> YgKey:
@@ -513,7 +345,7 @@ def traverse_graph(
 
     ## Args:
     - ygs -- YardGroups by name
-    - raw_ygs -- yard features. A merged record's track counts as track of the YardGroup it's merged into; track of records not in `ygs` is just track.
+    - raw_ygs -- yard features. A merged record's track counts as track of the YardGroup it's merged into.
     - raw_network -- rail line features
     - merges -- merged YardGroup name -> the one it's merged into
     - excluded_track_net_codes -- `NET` codes the walk skips (abandoned lines, ferries, ...)
@@ -582,13 +414,22 @@ def traverse_graph(
     return norm_edges
 
 
-def build_graph(
+def _copy_yard_attributes(graph: Graph, ygs: dict[YgKey, YardGroup]) -> None:
+    """Copy each YardGroup's city, state and track length onto its node."""
+    for yg_name, yg in ygs.items():
+        if yg_name in graph.nodes:
+            graph.nodes[yg_name]["city"] = yg.city
+            graph.nodes[yg_name]["state"] = yg.state
+            graph.nodes[yg_name]["shape_length_km"] = yg.shape_length_km
+
+
+def build_or_load_graph(
     ygs: dict[YgKey, YardGroup],
     merges: dict[YgKey, YgKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
 ) -> Graph:
     """
-    Load the YardGroup graph from `GRAPH_FILE`, or build it with `traverse_graph` and save it.
+    Load the YardGroup graph from `GRAPH_FILE`, or, only when that file is missing, build it with `traverse_graph` (the walk) and save it.
 
     ## Args:
     - ygs -- YardGroups by name
@@ -603,11 +444,7 @@ def build_graph(
         if file_exists:
             graph = cast(Graph, nx.read_gexf(path=GRAPH_DIR / GRAPH_FILE))
             print(f"{GRAPH_FILE} exists, skipping YardGroup Graph generation.")
-            for yg_name, yg in ygs.items():
-                if yg_name in graph.nodes:
-                    graph.nodes[yg_name]["city"] = yg.city
-                    graph.nodes[yg_name]["state"] = yg.state
-                    graph.nodes[yg_name]["shape_length_km"] = yg.shape_length_km
+            _copy_yard_attributes(graph, ygs)
             return graph
     except (ValidationError, FileNotFoundError) as e:
         print(
@@ -653,6 +490,28 @@ def load_yard_group_changes() -> tuple[dict[YgKey, YgKey], set[YgKey], set[YgKey
     drops = {YgKey(row["yard_group"]) for row in rows if row["action"] == "drop"}
     bars = {YgKey(row["yard_group"]) for row in rows if row["action"] == "bar"}
     return merges, drops, bars
+
+
+def warn_unmatched_changes(
+    records: dict[YgKey, YardGroup],
+    merges: dict[YgKey, YgKey],
+    drops: set[YgKey],
+    bars: set[YgKey],
+) -> list[YgKey]:
+    """
+    Warn about yard groups named in the changes CSV that the yard records don't have.
+
+    ## Returns:
+    - The unmatched names, sorted.
+    """
+    named = set(merges) | set(merges.values()) | drops | bars
+    missing = sorted(name for name in named if name not in records)
+    if missing:
+        print(
+            f"Warning: {len(missing):,} yard group(s) in {YARD_GROUP_CHANGES_FILE} are not in the NTAD yard records, "
+            f"so their rows are skipped (the record IDs may have changed): {', '.join(missing)}"
+        )
+    return missing
 
 
 def merge_yard_group_records(
@@ -713,6 +572,23 @@ def merge_graph_nodes(graph: Graph, merges: dict[YgKey, YgKey]) -> Graph:
     return graph
 
 
+def drop_long_edges(graph: Graph, max_km: float) -> Graph:
+    """
+    Drop connections longer than `max_km`. The yards file has US yards only, so a route through Canada or Mexico becomes one long connection with no yard group, and so no crew change, on the way.
+
+    ## Args:
+    - graph -- YardGroup graph with `weight` (km) on every edge
+    - max_km -- longest connection kept
+
+    ## Returns:
+    - The same graph without those edges.
+    """
+    long = [(a, b) for a, b, d in graph.edges(data=True) if float(d["weight"]) > max_km]
+    graph.remove_edges_from(long)
+    print(f"Dropped {len(long):,} edges longer than {max_km:g} km.")
+    return graph
+
+
 def drop_redundant_edges(
     graph: Graph, tolerance: float = SAME_TRACK_TOLERANCE
 ) -> Graph:
@@ -767,6 +643,40 @@ def drop_redundant_edges(
     return graph
 
 
+def drop_bypassed_edges(graph: Graph, tolerance: float = SAME_TRACK_TOLERANCE) -> Graph:
+    """
+    Drop edges that a path through other yard groups makes redundant: `drop_redundant_edges` catches the paths through 1 YardGroup; this catches the rest.
+
+    Edges are checked longest first, each against the graph as it stands, and the graph stays as connected as before. Each check searches only up to the edge's own length times (1 + `tolerance`).
+
+    ## Args:
+    - graph -- YardGroup graph with `weight` (km) on every edge
+    - tolerance -- allowed extra length, as a fraction of A-C
+
+    ## Returns:
+    - The same graph without the bypassed edges.
+    """
+    edges = sorted(
+        ((a, b, float(w)) for a, b, w in graph.edges(data="weight")),
+        key=lambda e: -e[2],
+    )
+    dropped = 0
+    for a, b, km in edges:
+        data = graph[a][b]
+        graph.remove_edge(a, b)
+        try:
+            _ = nx.single_source_dijkstra(
+                graph, a, target=b, cutoff=km * (1 + tolerance), weight="weight"
+            )
+            dropped += 1
+        except nx.NetworkXNoPath:
+            _ = graph.add_edge(a, b, **data)
+    print(
+        f"Dropped {dropped:,} edges with a path through several YardGroups at most {tolerance:.0%} longer; {graph.number_of_edges():,} edges left."
+    )
+    return graph
+
+
 def _save_ygs(ygs: dict[YgKey, YardGroup], path: Path) -> None:
     GRAPH_DIR.mkdir(exist_ok=True)
     with open(path, "w") as f:
@@ -791,7 +701,7 @@ def _load_ygs_dict() -> dict[YgKey, YardGroup] | None:
 
 def load_yard_records() -> dict[YgKey, YardGroup]:
     """
-    Every NTAD yard record as a YardGroup with elevation and city. Read from `YARD_RECORDS_FILE`, or built from the geojson (slow, lots of elevation and geocoding lookups) and saved.
+    Every NTAD yard record as a YardGroup with elevation and city. Read from `YARD_RECORDS_FILE`, or built from the geojson and saved.
 
     ## Returns:
     - YardGroups by name, one per record. No FAF zones assigned yet.
@@ -913,7 +823,7 @@ def load_yards_geojson() -> list[YardGroupFeature]:
             raise ValueError("Invalid rail yard GeoJSON features")
         return yg_adapter.validate_python(gj_ygs["features"])
     except ValidationError as e:
-        raise ValueError("Invalid rail network GeoJSON features") from e
+        raise ValueError("Invalid rail yard GeoJSON features") from e
 
 
 def load_geojson() -> tuple[list[YardGroupFeature], list[RailNetworkFeature]]:
@@ -952,49 +862,61 @@ def generate_or_load_network(
     cfg: Config | None = None,
 ) -> tuple[dict[YgKey, YardGroup], Graph, OdAssignmentStats]:
     """
-    Entry point for the YardGroup dict (`.json`) and the YardGroup graph (`.gexf`). If both files exist they're just loaded. Otherwise the missing pieces get built:
+    Entry point for the YardGroup dict (`.json`) and the YardGroup graph (`.gexf`). If both files exist they're loaded; otherwise the missing pieces get built:
     1. YardGroups: the yard records (`load_yard_records`) with the changes CSV applied. Duplicates get merged, and drops are left out if the graph is being built too.
     2. Graph: loaded, or walked over the track in use.
     3. FAF zone yard groups (`assign_od_yard_groups`), which need the graph distances.
     4. Save the dict.
 
-    Changed the zone settings or merges? Delete the `.json`. Changed the drops or the track in use? Delete the `.gexf` too. Redundant edges get dropped on every load (`drop_redundant_edges`); the `.gexf` keeps them all.
-
     ## Args:
-    - cfg -- Config for the track in use and the zone settings. Defaults to the config file, or `Config()` if there isn't one.
+    - cfg -- Config for the track in use and the zone settings. Defaults to the config file (`configs/schedule_config.yaml`).
 
     ## Returns:
-    - The YardGroup dict, the graph, and the FAF zone stats (empty when the dict was loaded from file).
+    - The YardGroup dict, the graph, and the FAF zone stats (recounted from the dict when it was loaded from file).
     """
-    cfg = cfg if cfg is not None else load_config()[1]
+    cfg = cfg if cfg is not None else load_config()
+    max_km = cfg.network_settings.max_connection_km
     merges, drops, bars = load_yard_group_changes()
     graph_exists = (GRAPH_DIR / GRAPH_FILE).exists()
 
     ygs_dict = _load_ygs_dict() if graph_exists else None
+    ygs_graph: Graph | None = None
     if ygs_dict is not None:
-        ygs_graph = merge_graph_nodes(build_graph(ygs_dict), merges)
+        ygs_graph = merge_graph_nodes(build_or_load_graph(ygs_dict), merges)
         if set(ygs_dict) == set(ygs_graph.nodes):
-            return ygs_dict, drop_redundant_edges(ygs_graph), OdAssignmentStats()
+            return (
+                ygs_dict,
+                drop_bypassed_edges(
+                    drop_redundant_edges(drop_long_edges(ygs_graph, max_km))
+                ),
+                od_assignment_stats(ygs_dict, cfg),
+            )
         print(
             f"{YARD_GROUPS_DICT_FILE} does not hold the YardGroups of {GRAPH_FILE}, regenerating dictionary."
         )
 
     records = load_yard_records()
+    warn_unmatched_changes(records, merges, drops, bars)
     if not graph_exists:
         records = {name: yg for name, yg in records.items() if name not in drops}
     ygs_dict = merge_yard_group_records(records, merges)
-    ygs_graph = build_graph(
-        ygs_dict, merges, cfg.network_settings.excluded_track_net_codes
-    )
+    if ygs_graph is None:
+        ygs_graph = build_or_load_graph(
+            ygs_dict, merges, cfg.network_settings.excluded_track_net_codes
+        )
+    else:  # graph.gexf was already read above; only the YardGroup attributes change
+        _copy_yard_attributes(ygs_graph, ygs_dict)
     if not graph_exists:
         parts = sorted(map(len, nx.connected_components(ygs_graph)), reverse=True)
         print(
             f"Generated {GRAPH_FILE}: {ygs_graph.number_of_nodes():,} YardGroups and {ygs_graph.number_of_edges():,} edges in {len(parts):,} connected part(s); YardGroups per part: {parts[:10]}."
         )
-    # An older graph can still have merged records as nodes (merged here) or dropped yards (kept, but barred from FAF zones).
+
     ygs_graph = merge_graph_nodes(ygs_graph, merges)
     ygs_dict = {name: yg for name, yg in ygs_dict.items() if name in ygs_graph}
-    ygs_graph = drop_redundant_edges(ygs_graph)
+    ygs_graph = drop_bypassed_edges(
+        drop_redundant_edges(drop_long_edges(ygs_graph, max_km))
+    )
     od_assignment = assign_od_yard_groups(ygs_dict, ygs_graph, cfg, barred=drops | bars)
     _save_ygs(ygs_dict, GRAPH_DIR / YARD_GROUPS_DICT_FILE)
     return ygs_dict, ygs_graph, od_assignment

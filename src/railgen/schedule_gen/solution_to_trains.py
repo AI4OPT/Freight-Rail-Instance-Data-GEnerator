@@ -17,7 +17,7 @@ from railgen.schedule_gen.attributes import (
 )
 from railgen.schedule_gen.candidates import CandidateService
 from railgen.schedule_gen.demand import Commodity
-from railgen.schedule_gen.model import OdModelIndex, Solution
+from railgen.schedule_gen.model import OdModelIndex, Solution, derive_stop_events
 from railgen.schedule_gen.schedule_config import ServiceDesignSettings
 from railgen.utils import (
     MINUTES_PER_DAY,
@@ -56,6 +56,122 @@ def deviations(
     return out
 
 
+@dataclass(frozen=True, kw_only=True)
+class EmptyLegsCut:
+    """Legs of selected services cut because they carried no freight."""
+
+    end_legs: int  # before the first or after the last leg with freight
+    middle_legs: int  # between two legs with freight; the train is split there
+    services: int  # services with a leg cut
+    added_services: int  # extra services from the splits
+    train_km_per_week: float
+    empty_services: int  # selected services with no freight at all, left out
+
+    def line(self) -> str:
+        return (
+            f"empty legs cut (trains start at their first pick-up, end at their last "
+            f"set-out and are split where a leg carries nothing): {self.end_legs:,} end "
+            f"and {self.middle_legs:,} middle legs of {self.services:,} trains, "
+            f"{self.added_services:,} trains added by splits, "
+            f"{self.train_km_per_week:,.0f} train-km/week; trains with no freight left "
+            f"out: {self.empty_services:,}"
+        )
+
+
+def _loaded_stretches(legs: set[int]) -> list[tuple[int, int]]:
+    """Runs of consecutive leg numbers, as (first, last)."""
+    stretches: list[tuple[int, int]] = []
+    for i in sorted(legs):
+        if stretches and i == stretches[-1][1] + 1:
+            stretches[-1] = (stretches[-1][0], i)
+        else:
+            stretches.append((i, i))
+    return stretches
+
+
+def cut_empty_legs(
+    solution: Solution, services: dict[str, CandidateService]
+) -> tuple[Solution, dict[str, CandidateService], EmptyLegsCut]:
+    """The solution with every leg that carries no freight cut from the selected services.
+
+    A candidate runs its yard pair's whole route, so the model can leave legs empty. Empty
+    legs at the ends are cut, so a train starts at its first pick-up and ends at its last
+    set-out; a service with empty legs in the middle becomes one service per stretch of
+    legs with freight (ids `<id>-1`, `<id>-2`, ...), each with the same runs. No freight
+    crosses an empty leg, so the flows keep their tons; only their services and leg numbers
+    change. The pieces are the shorter services that a larger candidate set would have
+    offered (Zhu, Crainic and Gendreau 2014), at fewer train-km. Returns the selected
+    services only.
+    """
+    loaded: dict[str, set[int]] = defaultdict(set)
+    for sid, i, _k in solution.flows:
+        loaded[sid].add(i)
+    pieces: dict[str, CandidateService] = {}
+    runs_per_week: dict[str, int] = {}
+    new_leg: dict[
+        tuple[str, int], tuple[str, int]
+    ] = {}  # (service, leg) -> (piece, leg)
+    end_legs = middle_legs = cut_services = added = empty = 0
+    km = 0.0
+    for sid, runs in solution.runs_per_week.items():
+        s = services[sid]
+        if sid not in loaded:
+            empty += 1
+            continue
+        n = len(s.stop_positions) - 1
+        stretches = _loaded_stretches(loaded[sid])
+        kept = sum(last - first + 1 for first, last in stretches)
+        ends = (stretches[0][0] - 1) + (n - stretches[-1][1])
+        if kept < n:
+            end_legs += ends
+            middle_legs += n - kept - ends
+            cut_services += 1
+            added += len(stretches) - 1
+            km += runs * (
+                sum(s.leg_km)
+                - sum(sum(s.leg_km[first - 1 : last]) for first, last in stretches)
+            )
+        for j, (first, last) in enumerate(stretches, start=1):
+            pid = sid if len(stretches) == 1 else f"{sid}-{j}"
+            a, b = s.stop_positions[first - 1], s.stop_positions[last]
+            pieces[pid] = replace(
+                s,
+                id=pid,
+                path=s.path[a : b + 1],
+                stop_positions=tuple(
+                    p - a for p in s.stop_positions[first - 1 : last + 1]
+                ),
+                leg_km=s.leg_km[first - 1 : last],
+                leg_capacity_tons=s.leg_capacity_tons[first - 1 : last],
+            )
+            runs_per_week[pid] = runs
+            for i in range(first, last + 1):
+                new_leg[(sid, i)] = (pid, i - first + 1)
+    flows = {
+        (*new_leg[(sid, i)], k): tons for (sid, i, k), tons in solution.flows.items()
+    }
+    on_board, pick_up, set_out = derive_stop_events(flows, pieces)
+    return (
+        replace(
+            solution,
+            runs_per_week=runs_per_week,
+            flows=flows,
+            on_board=on_board,
+            pick_up=pick_up,
+            set_out=set_out,
+        ),
+        pieces,
+        EmptyLegsCut(
+            end_legs=end_legs,
+            middle_legs=middle_legs,
+            services=cut_services,
+            added_services=added,
+            train_km_per_week=km,
+            empty_services=empty,
+        ),
+    )
+
+
 def split_runs(runs: int, max_per_symbol: int = 7) -> list[int]:
     """Weekly runs of one service -> runs per symbol (full symbols first, remainder last).
 
@@ -89,12 +205,16 @@ def crew_change_positions(
     hop_hours: list[float],
     work_dwell_hours: dict[int, float],
     usable_hours: float,
+    merge_hours: float = 0.0,
 ) -> CrewPlan:
     """Greedy crew changes along a path. Any yard on the path may host a crew change.
 
     Walk the path adding running time plus dwell at work stops. When the next stretch
     would push duty time past the usable limit (duty hours minus terminal hours), change
-    crews at the yard just reached and restart the clock.
+    crews at the yard just reached and restart the clock. If the train worked at a stop
+    at most `merge_hours` of running before that yard, the crew change is merged into
+    that work stop, as long as the new crew can still run the next stretch; this avoids
+    a crew-only stop right after a work stop.
 
     `hop_hours[j]` is the running time from path node j to node j+1. `work_dwell_hours`
     maps path indices of work stops to their dwell, which counts against the crew that
@@ -106,12 +226,51 @@ def crew_change_positions(
     for j, hop in enumerate(hop_hours):
         need = work_dwell_hours.get(j, 0.0) + hop
         if duty > 0 and duty + need > usable_hours:
-            changes.append(j)
-            duty = 0.0
+            at, duty = j, 0.0
+            start = j if j in work_dwell_hours else changes[-1] if changes else 0
+            for k in range(j - 1, start, -1):
+                if sum(hop_hours[k:j]) > merge_hours:
+                    break
+                if k in work_dwell_hours:
+                    worked = work_dwell_hours[k] + sum(hop_hours[k:j])
+                    if worked + need <= usable_hours:
+                        at, duty = k, worked
+                    break
+            changes.append(at)
         if need > usable_hours:
             over.append(j)
         duty += need
     return CrewPlan(change_positions=changes, over_limit=over)
+
+
+@dataclass(frozen=True, kw_only=True)
+class LongStretch:
+    """A stretch between two consecutive yard groups that one crew cannot cover within its usable hours."""
+
+    symbol: TrainSymbol
+    bgn_yg: YgKey
+    end_yg: YgKey
+    hours: float  # dwell at bgn_yg (if the train works there) plus the run to end_yg
+
+
+def long_stretch_lines(
+    stretches: list[LongStretch], usable_hours: float, shown: int = 10
+) -> list[str]:
+    """Report lines on the stretches no crew can cover: none if there are none."""
+    if not stretches:
+        return []
+    listed = "; ".join(
+        f"{s.symbol} {s.bgn_yg} -> {s.end_yg} {s.hours:.1f} h"
+        for s in sorted(stretches, key=lambda s: -s.hours)[:shown]
+    )
+    more = f"; and {len(stretches) - shown:,} more" if len(stretches) > shown else ""
+    return [
+        (
+            f"{len({s.symbol for s in stretches}):,} train symbols have {len(stretches):,} stretches "
+            f"longer than a crew's {usable_hours:g} usable hours between two yard groups, so no crew "
+            f"change can split them: {listed}{more}"
+        )
+    ]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -126,8 +285,10 @@ def output_stops(
     runs: int,
     network: RailNetwork,
     settings: ServiceDesignSettings,
-) -> tuple[list[OutputStop], dict[int, float]]:
-    """Output stops of one service, and per-run freight tons on board after each path position."""
+) -> tuple[list[OutputStop], dict[int, float], dict[int, float]]:
+    """Output stops of one service, per-run freight tons on board after each path position,
+    and the path positions whose dwell plus next hop alone exceed a crew's usable hours
+    (with those hours)."""
     sid = service.id
     n = len(service.stop_positions) - 1
     pu = {i: solution.pick_up.get((sid, i), 0.0) / runs for i in range(n + 1)}
@@ -140,18 +301,24 @@ def output_stops(
         has_pu, has_so = pu[i] > _EPS, so[i] > _EPS
         if has_pu or has_so:
             work[service.stop_positions[i]] = (has_pu, has_so)
+    speed = network.cfg.train_settings.speed_km_h_by_category[
+        settings.category_of(service.train_type)
+    ]
     hop_hours = [
-        network.get_travel_time([a, b]) / 60 for a, b in pairwise(service.path)
+        network.get_travel_time([a, b], speed) / 60 for a, b in pairwise(service.path)
     ]
     dwell = settings.dwell_minutes
     work_dwell_hours = {
         pos: dwell.minutes(p, s, False) / 60 for pos, (p, s) in work.items()
     }
-    crew = set(
-        crew_change_positions(
-            hop_hours, work_dwell_hours, settings.crew.usable_hours
-        ).change_positions
+    plan = crew_change_positions(
+        hop_hours,
+        work_dwell_hours,
+        settings.crew.usable_hours,
+        settings.crew.merge_with_work_stop_minutes / 60,
     )
+    crew = set(plan.change_positions)
+    too_long = {j: work_dwell_hours.get(j, 0.0) + hop_hours[j] for j in plan.over_limit}
 
     last = len(service.path) - 1
     stops: list[OutputStop] = []
@@ -178,7 +345,7 @@ def output_stops(
         tons = solution.on_board.get((sid, k + 1), 0.0) / runs
         for pos in range(service.stop_positions[k], service.stop_positions[k + 1]):
             on_board[pos] = tons
-    return stops, on_board
+    return stops, on_board, too_long
 
 
 def wrap_week(cur_min: int, is_wrapped: bool) -> tuple[int, bool]:
@@ -203,7 +370,8 @@ def build_segments(
     Returns None when the trip wraps past a week from this start time (caller retries).
     """
     power = settings.locomotive_power
-    category = settings.train_type_category[service.train_type]
+    category = settings.category_of(service.train_type)
+    speed = network.cfg.train_settings.speed_km_h_by_category[category]
     starting_min = rng.randint(0, MINUTES_PER_WEEK - 1)
     cur_min = starting_min
     is_wrapped = False
@@ -222,7 +390,7 @@ def build_segments(
         dep_day = get_elapsed_day(elapsed, starting_min)
 
         leg_path = list(service.path[bgn.position : end.position + 1])
-        cur_min += round(network.get_travel_time(leg_path))
+        cur_min += round(network.get_travel_time(leg_path, speed))
         if not is_wrapped:
             cur_min, is_wrapped = wrap_week(cur_min, is_wrapped)
         if cur_min > starting_min and is_wrapped:
@@ -263,14 +431,18 @@ def to_trains(
     settings: ServiceDesignSettings,
     rng: random.Random,
     service_of: dict[TrainSymbol, CandidateService] | None = None,
+    long_stretches: list[LongStretch] | None = None,
 ) -> list[Train]:
-    """Trains of a solution. `service_of`, when given, is filled with each symbol's service."""
+    """Trains of a solution. `service_of`, when given, is filled with each symbol's service;
+    `long_stretches`, when given, with the stretches no crew can cover within its hours."""
     trains: list[Train] = []
     counters: dict[TrainCategory, int] = {}
     for sid, runs in sorted(solution.runs_per_week.items()):
         service = services[sid]
-        stops, on_board = output_stops(service, solution, runs, network, settings)
-        category = TrainCategory(settings.train_type_category[service.train_type])
+        stops, on_board, too_long = output_stops(
+            service, solution, runs, network, settings
+        )
+        category = TrainCategory(settings.category_of(service.train_type))
         for symbol_runs in split_runs(runs, settings.max_runs_per_week):
             days = pick_days(symbol_runs, rng)
             segments = None
@@ -296,6 +468,16 @@ def to_trains(
             )
             if service_of is not None:
                 service_of[symbol] = service
+            if long_stretches is not None:
+                long_stretches.extend(
+                    LongStretch(
+                        symbol=symbol,
+                        bgn_yg=service.path[j],
+                        end_yg=service.path[j + 1],
+                        hours=hours,
+                    )
+                    for j, hours in sorted(too_long.items())
+                )
     return trains
 
 
@@ -352,9 +534,15 @@ def return_trip(
     duty_hours = (arrival - crew_start + dwell.minutes(False, True, False)) / 60
 
     path = list(reversed(service.path))
-    hop_hours = [network.get_travel_time([a, b]) / 60 for a, b in pairwise(path)]
+    speed = network.cfg.train_settings.speed_km_h_by_category[train.category]
+    hop_hours = [network.get_travel_time([a, b], speed) / 60 for a, b in pairwise(path)]
+    # The turn (position 1) is a work stop, so a crew change just past it merges into it;
+    # its dwell is already in `duty_hours`.
     plan = crew_change_positions(
-        [duty_hours, *hop_hours], {}, settings.crew.usable_hours
+        [duty_hours, *hop_hours],
+        {1: 0.0},
+        settings.crew.usable_hours,
+        settings.crew.merge_with_work_stop_minutes / 60,
     )
     crew = {j - 1 for j in plan.change_positions}  # the first hop is the duty worked
     turn_crew = 0 in crew
@@ -375,6 +563,9 @@ def return_trip(
         / cars.cargo_tons_per_car_by_category[category]
         * cars.empty_car_tons_by_category[category]
     )
+    reason[end] = replace(
+        reason[end], so_amount=empty_tons
+    )  # the empty cars, set out at home
     locomotives = _week_of(
         {d: max(leg.req_counts_by_day.get_day(d) for leg in outbound) for d in _DAYS}
     )
@@ -390,7 +581,7 @@ def return_trip(
             cur += round(dwell.minutes(False, False, True))
         dep = cur
         leg_path = path[a : b + 1]
-        cur += round(network.get_travel_time(leg_path))
+        cur += round(network.get_travel_time(leg_path, speed))
         if cur >= MINUTES_PER_WEEK:
             return None
         legs.append(

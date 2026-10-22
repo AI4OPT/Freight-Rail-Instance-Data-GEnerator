@@ -2,8 +2,8 @@
 
 Demand gets built once (`demand.py`). Then for each category (A, M, B, I): build the
 candidates and model, solve it or load a saved solution (`solve_by_category.py`), check
-yard balances, and extract trains (`solution_to_trains.py`). Return trips get added at the
-end to even out locomotives (`return_trips.py`).
+yard balances, and extract trains (`solution_to_trains.py`). Circuitous trains get added at the
+end to even out locomotives (`circuitous_trains.py`).
 """
 
 import random
@@ -14,19 +14,25 @@ from pathlib import Path
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import Train, TrainSymbol
 from railgen.schedule_gen.candidates import CandidateService, allowed_yards
+from railgen.schedule_gen.circuitous_trains import (
+    add_circuitous_trains,
+    balance_lines,
+    terminals,
+)
 from railgen.schedule_gen.demand import (
     build_commodities,
     demand_lines,
+    kept_lines,
+    short_intra_lines,
     small_flow_lines,
     yard_targets,
 )
 from railgen.schedule_gen.model import model_size
-from railgen.schedule_gen.return_trips import (
-    add_return_trips,
-    balance_lines,
-)
 from railgen.schedule_gen.solution_to_trains import (
+    LongStretch,
+    cut_empty_legs,
     deviations,
+    long_stretch_lines,
     solution_yard_net,
     to_trains,
     write_stop_report,
@@ -44,7 +50,6 @@ def generate_trains(
     seed: int, network: RailNetwork, output_dir: Path, solution_dir: Path
 ) -> list[Train]:
     settings = network.cfg.service_design_settings
-    rng = random.Random(seed)
     start = time.perf_counter()
     last = start
 
@@ -63,7 +68,12 @@ def generate_trains(
         f"demand done: {report.kept_tons:,.0f} of {report.faf_tons:,.0f} t/week kept; "
         f"{report.zone_pairs:,} zone pairs, {report.commodities:,} commodities, {len(routes):,} yard pairs"
     )
-    demand_report = demand_lines(report, settings) + small_flow_lines(report)
+    demand_report = (
+        demand_lines(report, settings)
+        + small_flow_lines(report)
+        + short_intra_lines(report, settings)
+        + kept_lines(report, settings)
+    )
     for line in demand_report:
         log(line)
     report_lines = ["Demand", *demand_report]
@@ -115,36 +125,52 @@ def generate_trains(
             )
         log(f"category {cat}: every yard matches its target")
 
+        solution, services, cut = cut_empty_legs(solution, model.index.services)
+        log(f"category {cat}: {cut.line()}")
+
         log(f"category {cat} 4/4 extraction: symbols, days, work and crew stops, times")
+        long_stretches: list[LongStretch] = []
         cat_trains = to_trains(
-            solution, model.index.services, network, model.settings, rng, service_of
+            solution,
+            services,
+            network,
+            model.settings,
+            # New rng instance for each train category
+            random.Random(f"{seed}-{cat}"),
+            service_of,
+            long_stretches,
         )
         log(f"category {cat}: {len(cat_trains):,} train symbols")
+        crew_lines = long_stretch_lines(long_stretches, settings.crew.usable_hours)
+        for line in crew_lines:
+            log(f"category {cat}: warning: {line}")
         trains.extend(cat_trains)
 
         stop_report = write_stop_report(
-            cat, solution, model.index.services, model.index.commodities, output_dir
+            cat, solution, services, model.index.commodities, output_dir
         )
         for line in stop_report:
             log(f"category {cat}: {line}")
-        report_lines += ["", f"Category {cat}", *stop_report]
+        report_lines += ["", f"Category {cat}", cut.line(), *stop_report, *crew_lines]
 
-    zone_of = {y: yg.od_zone_code for y, yg in network.ygs_dict.items()}
-    before = balance_lines(trains, zone_of)
-    trains, lever_lines = add_return_trips(trains, service_of, network, settings, seed)
-    after = balance_lines(trains, zone_of)
+    ends = terminals(
+        trains
+    )  # before circuitous trains, so both summaries count the same yards
+    before = balance_lines(trains, ends)
+    trains, lever_lines = add_circuitous_trains(trains, service_of, network, settings)
+    after = balance_lines(trains, ends)
     for line in before:
-        log(f"locomotive balance before return trips: {line}")
+        log(f"locomotive balance before circuitous trains: {line}")
     for line in lever_lines:
         log(line)
     for line in after:
         log(f"locomotive balance: {line}")
     report_lines += [
         "",
-        "Locomotive balance before return trips",
+        "Locomotive balance before circuitous trains",
         *before,
         "",
-        "Return trips",
+        "Circuitous trains",
         *lever_lines,
         "",
         "Locomotive balance",

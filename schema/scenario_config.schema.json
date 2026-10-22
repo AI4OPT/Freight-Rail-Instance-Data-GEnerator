@@ -1,0 +1,542 @@
+{
+  "$defs": {
+    "AsymmetricLaplace": {
+      "properties": {
+        "distr_type": {
+          "const": "asymmetric_laplace",
+          "title": "Distr Type",
+          "type": "string"
+        },
+        "location": {
+          "title": "Location",
+          "type": "number"
+        },
+        "scale": {
+          "title": "Scale",
+          "type": "number"
+        },
+        "skew": {
+          "title": "Skew",
+          "type": "number"
+        }
+      },
+      "required": [
+        "distr_type",
+        "location",
+        "scale",
+        "skew"
+      ],
+      "title": "AsymmetricLaplace",
+      "type": "object"
+    },
+    "Coord": {
+      "description": "A lat/lon coordinate.",
+      "properties": {
+        "lat": {
+          "description": "Latitude",
+          "title": "Lat",
+          "type": "number"
+        },
+        "lon": {
+          "description": "Longitude",
+          "title": "Lon",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lat",
+        "lon"
+      ],
+      "title": "Coord",
+      "type": "object"
+    },
+    "Distributions": {
+      "additionalProperties": false,
+      "description": "Each dist is either a fully defined distribution or the name of a predefined distribution.\nDefaults are exponential with illustrative means: delays only, never early.",
+      "properties": {
+        "initial_departure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Minutes between a train's scheduled and actual first departure.",
+          "title": "Initial Departure"
+        },
+        "trip_time_percent_diff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Percentage difference between actual run time of a trip leg and its scheduled run time.",
+          "title": "Trip Time Percent Diff"
+        },
+        "dwell_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Extra dwell minutes at a stop, on top of the planned dwell less any recovery. A delay: negative draws count as 0, so a non-negative distribution is expected.",
+          "title": "Dwell Time"
+        }
+      },
+      "title": "Distributions",
+      "type": "object"
+    },
+    "DistributionsOverrides": {
+      "additionalProperties": false,
+      "description": "Same entries as `Distributions` but None fields fallback to default.",
+      "properties": {
+        "initial_departure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Departure"
+        },
+        "trip_time_percent_diff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trip Time Percent Diff"
+        },
+        "dwell_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dwell Time"
+        }
+      },
+      "title": "DistributionsOverrides",
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "description": "City and state code.",
+      "properties": {
+        "city": {
+          "description": "City name.",
+          "title": "City",
+          "type": "string"
+        },
+        "state": {
+          "description": "Two-letter US state code normalized to uppercase.",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "city",
+        "state"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
+    "LogNormalDist": {
+      "description": "`location` + exp(N(`log_mean`, `log_stdev`)); never below `location`.",
+      "properties": {
+        "distr_type": {
+          "const": "log_normal",
+          "title": "Distr Type",
+          "type": "string"
+        },
+        "log_mean": {
+          "title": "Log Mean",
+          "type": "number"
+        },
+        "log_stdev": {
+          "minimum": 0,
+          "title": "Log Stdev",
+          "type": "number"
+        },
+        "location": {
+          "default": 0.0,
+          "title": "Location",
+          "type": "number"
+        }
+      },
+      "required": [
+        "distr_type",
+        "log_mean",
+        "log_stdev"
+      ],
+      "title": "LogNormalDist",
+      "type": "object"
+    },
+    "Mixture": {
+      "description": "Picks one component with probability `weight`, then draws from it.",
+      "properties": {
+        "distr_type": {
+          "const": "mixture",
+          "title": "Distr Type",
+          "type": "string"
+        },
+        "components": {
+          "items": {
+            "$ref": "#/$defs/MixtureComponent"
+          },
+          "minItems": 1,
+          "title": "Components",
+          "type": "array"
+        }
+      },
+      "required": [
+        "distr_type",
+        "components"
+      ],
+      "title": "Mixture",
+      "type": "object"
+    },
+    "MixtureComponent": {
+      "properties": {
+        "weight": {
+          "description": "Probability that a sample comes from this component.",
+          "exclusiveMinimum": 0,
+          "title": "Weight",
+          "type": "number"
+        },
+        "negate": {
+          "default": false,
+          "description": "Use minus the drawn value, e.g. an early side given as positive minutes early.",
+          "title": "Negate",
+          "type": "boolean"
+        },
+        "distribution": {
+          "$ref": "#/$defs/_SingleDistribution"
+        }
+      },
+      "required": [
+        "weight",
+        "distribution"
+      ],
+      "title": "MixtureComponent",
+      "type": "object"
+    },
+    "NormalDist": {
+      "properties": {
+        "distr_type": {
+          "const": "normal",
+          "title": "Distr Type",
+          "type": "string"
+        },
+        "mean": {
+          "title": "Mean",
+          "type": "number"
+        },
+        "stdev": {
+          "title": "Stdev",
+          "type": "number"
+        }
+      },
+      "required": [
+        "distr_type",
+        "mean",
+        "stdev"
+      ],
+      "title": "NormalDist",
+      "type": "object"
+    },
+    "RegionDistributions": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coord"
+            },
+            {
+              "$ref": "#/$defs/Location"
+            }
+          ],
+          "description": "Center of the region. May be a 'lat,lon' coordinate or a city and state.",
+          "title": "Center"
+        },
+        "radius_km": {
+          "description": "Radius of the region in kilometers.",
+          "exclusiveMinimum": 0.0,
+          "title": "Radius Km",
+          "type": "number"
+        },
+        "dwell_time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dwell minutes distribution for every yard group in the region.",
+          "title": "Dwell Time"
+        },
+        "trip_time_percent_diff": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Trip time percent difference for every leg between two yard groups in the region.",
+          "title": "Trip Time Percent Diff"
+        }
+      },
+      "required": [
+        "center",
+        "radius_km"
+      ],
+      "title": "RegionDistributions",
+      "type": "object"
+    },
+    "ScenarioDistribution": {
+      "discriminator": {
+        "mapping": {
+          "asymmetric_laplace": "#/$defs/AsymmetricLaplace",
+          "log_normal": "#/$defs/LogNormalDist",
+          "mixture": "#/$defs/Mixture",
+          "normal": "#/$defs/NormalDist",
+          "weibull": "#/$defs/WeibullDist"
+        },
+        "propertyName": "distr_type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NormalDist"
+        },
+        {
+          "$ref": "#/$defs/AsymmetricLaplace"
+        },
+        {
+          "$ref": "#/$defs/WeibullDist"
+        },
+        {
+          "$ref": "#/$defs/LogNormalDist"
+        },
+        {
+          "$ref": "#/$defs/Mixture"
+        }
+      ]
+    },
+    "ScenarioGeneralConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Value used to seed random scenario generation. Null means a fresh random seed on every run.",
+          "title": "Seed"
+        },
+        "scenario_count": {
+          "default": 10,
+          "description": "Number of scenarios to generate.",
+          "title": "Scenario Count",
+          "type": "integer"
+        },
+        "minimum_dwell_share": {
+          "default": 0.75,
+          "description": "Share of a stop's planned dwell that is its minimum dwell (the work); the rest is a buffer that a late train uses up to recover time.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Minimum Dwell Share",
+          "type": "number"
+        }
+      },
+      "title": "ScenarioGeneralConfig",
+      "type": "object"
+    },
+    "TrainCategory": {
+      "description": "Category a train symbol belongs to.",
+      "enum": [
+        "A",
+        "M",
+        "B",
+        "I"
+      ],
+      "title": "TrainCategory",
+      "type": "string"
+    },
+    "WeibullDist": {
+      "description": "`location` + `scale` x a standard Weibull draw; never below `location`.",
+      "properties": {
+        "distr_type": {
+          "const": "weibull",
+          "title": "Distr Type",
+          "type": "string"
+        },
+        "shape": {
+          "exclusiveMinimum": 0,
+          "title": "Shape",
+          "type": "number"
+        },
+        "scale": {
+          "exclusiveMinimum": 0,
+          "title": "Scale",
+          "type": "number"
+        },
+        "location": {
+          "default": 0.0,
+          "title": "Location",
+          "type": "number"
+        }
+      },
+      "required": [
+        "distr_type",
+        "shape",
+        "scale"
+      ],
+      "title": "WeibullDist",
+      "type": "object"
+    },
+    "_SingleDistribution": {
+      "discriminator": {
+        "mapping": {
+          "asymmetric_laplace": "#/$defs/AsymmetricLaplace",
+          "log_normal": "#/$defs/LogNormalDist",
+          "normal": "#/$defs/NormalDist",
+          "weibull": "#/$defs/WeibullDist"
+        },
+        "propertyName": "distr_type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NormalDist"
+        },
+        {
+          "$ref": "#/$defs/AsymmetricLaplace"
+        },
+        {
+          "$ref": "#/$defs/WeibullDist"
+        },
+        {
+          "$ref": "#/$defs/LogNormalDist"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root of `scenario_config.yaml`.",
+  "properties": {
+    "general_settings": {
+      "$ref": "#/$defs/ScenarioGeneralConfig"
+    },
+    "distributions_pool": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ScenarioDistribution"
+      },
+      "description": "Collection of named reusable distributions.",
+      "title": "Distributions Pool",
+      "type": "object"
+    },
+    "default_distributions": {
+      "$ref": "#/$defs/Distributions",
+      "description": "Default distributions."
+    },
+    "train_category_distributions_overrides": {
+      "additionalProperties": {
+        "$ref": "#/$defs/DistributionsOverrides"
+      },
+      "description": "Per-category overrides of `default_distributions`. Categories and entries left out fall back to the defaults.",
+      "propertyNames": {
+        "$ref": "#/$defs/TrainCategory"
+      },
+      "title": "Train Category Distributions Overrides",
+      "type": "object"
+    },
+    "yard_group_dwell_distributions": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ScenarioDistribution"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "description": "Per-yard-group dwell minutes distributions. Also applies to first departures from the yard group.",
+      "title": "Yard Group Dwell Distributions",
+      "type": "object"
+    },
+    "leg_trip_time_percent_diff_distributions": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScenarioDistribution"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "type": "object"
+      },
+      "description": "Per-one-way-leg (origin -> destination) trip time percent difference.",
+      "title": "Leg Trip Time Percent Diff Distributions",
+      "type": "object"
+    },
+    "region_distributions": {
+      "description": "Distributions applied to all yard groups within a radius of a location. A yard group or leg may only get a distribution from one source.",
+      "items": {
+        "$ref": "#/$defs/RegionDistributions"
+      },
+      "title": "Region Distributions",
+      "type": "array"
+    }
+  },
+  "title": "ScenarioGenerationConfig",
+  "type": "object"
+}

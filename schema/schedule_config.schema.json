@@ -1,0 +1,702 @@
+{
+  "$defs": {
+    "CarWeight": {
+      "additionalProperties": false,
+      "description": "Car weights by category. Trailing tons = freight x (1 + empty car tons / cargo tons\nper car); they give the locomotive count and a run's freight limit. Schedule tonnage is\nfreight, except on a circuitous train's way back (its empty cars).",
+      "properties": {
+        "empty_car_tons_by_category": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Tons of one empty car. 0 = freight only.",
+          "title": "Empty Car Tons By Category",
+          "type": "object"
+        },
+        "cargo_tons_per_car_by_category": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Tons of freight in one loaded car.",
+          "title": "Cargo Tons Per Car By Category",
+          "type": "object"
+        }
+      },
+      "title": "CarWeight",
+      "type": "object"
+    },
+    "CircuitousTrains": {
+      "additionalProperties": false,
+      "description": "Trains sent straight back to their origin as the same symbol, with their empty cars and\nthe locomotives of their heaviest leg, to reduce the locomotive imbalance. Chosen one at a\ntime, the most helpful first, within each category's share; a return that does not help,\nor does not fit in the week, is not added.",
+      "properties": {
+        "short_empty_returns": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Per category, e.g. {M: 0.5}: share of its short trains (at most `short_max_miles` one way) that may come back; unlisted get none.",
+          "title": "Short Empty Returns",
+          "type": "object"
+        },
+        "long_empty_returns": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Per category: share of its long trains that may come back; unlisted get none.",
+          "title": "Long Empty Returns",
+          "type": "object"
+        },
+        "short_max_miles": {
+          "default": 225.0,
+          "description": "One-way miles up to which a train is short.",
+          "exclusiveMinimum": 0,
+          "title": "Short Max Miles",
+          "type": "number"
+        }
+      },
+      "title": "CircuitousTrains",
+      "type": "object"
+    },
+    "Costs": {
+      "additionalProperties": false,
+      "description": "Objective weights.",
+      "properties": {
+        "train_start": {
+          "default": 400.0,
+          "description": "Cost of one run of a train.",
+          "title": "Train Start",
+          "type": "number"
+        },
+        "per_train_mile": {
+          "default": 10.0,
+          "description": "Cost per mile of one run, over its whole route.",
+          "title": "Per Train Mile",
+          "type": "number"
+        },
+        "per_distinct_train": {
+          "default": 0.0,
+          "description": "Weekly charge for each service (yard pair and train type) that runs at all. 0 leaves out its binary variables.",
+          "title": "Per Distinct Train",
+          "type": "number"
+        },
+        "transfer_fixed": {
+          "default": 0.0,
+          "description": "Cost of each change of train of a commodity at a yard.",
+          "title": "Transfer Fixed",
+          "type": "number"
+        },
+        "transfer_per_ton": {
+          "default": 0.0,
+          "description": "Added per ton/week of the commodity that changes trains. Both 0 leaves out the transfer variables.",
+          "title": "Transfer Per Ton",
+          "type": "number"
+        }
+      },
+      "title": "Costs",
+      "type": "object"
+    },
+    "CrewRule": {
+      "additionalProperties": false,
+      "description": "Crew changes placed after the model along each selected train.",
+      "properties": {
+        "duty_hours": {
+          "default": 12.0,
+          "description": "On-duty limit of a crew, in hours.",
+          "title": "Duty Hours",
+          "type": "number"
+        },
+        "terminal_hours": {
+          "default": 0.0,
+          "description": "On-duty time not spent running; usable hours = duty_hours - terminal_hours.",
+          "title": "Terminal Hours",
+          "type": "number"
+        },
+        "merge_with_work_stop_minutes": {
+          "default": 15.0,
+          "description": "A crew change that falls at most this many minutes' run after a work stop is moved back to that stop.",
+          "minimum": 0,
+          "title": "Merge With Work Stop Minutes",
+          "type": "number"
+        }
+      },
+      "title": "CrewRule",
+      "type": "object"
+    },
+    "DwellMinutes": {
+      "additionalProperties": false,
+      "description": "Dwell at an intermediate stop, in minutes, by the events that happen there. A stop\nwith no event has no dwell.",
+      "properties": {
+        "crew_only": {
+          "default": 20.0,
+          "description": "Crew change only.",
+          "title": "Crew Only",
+          "type": "number"
+        },
+        "so": {
+          "default": 30.0,
+          "description": "Set-out only.",
+          "title": "So",
+          "type": "number"
+        },
+        "pu": {
+          "default": 60.0,
+          "description": "Pick-up only.",
+          "title": "Pu",
+          "type": "number"
+        },
+        "pu_so": {
+          "default": 90.0,
+          "description": "Pick-up and set-out.",
+          "title": "Pu So",
+          "type": "number"
+        },
+        "so_crew": {
+          "default": 70.0,
+          "description": "Set-out and crew change.",
+          "title": "So Crew",
+          "type": "number"
+        },
+        "pu_crew": {
+          "default": 80.0,
+          "description": "Pick-up and crew change.",
+          "title": "Pu Crew",
+          "type": "number"
+        },
+        "pu_so_crew": {
+          "default": 140.0,
+          "description": "Pick-up, set-out and crew change.",
+          "title": "Pu So Crew",
+          "type": "number"
+        }
+      },
+      "title": "DwellMinutes",
+      "type": "object"
+    },
+    "ExcludedFlow": {
+      "additionalProperties": false,
+      "description": "FAF rows removed from demand: origin zone, destination zone, SCTG codes, and why.",
+      "properties": {
+        "origin_zone": {
+          "title": "Origin Zone",
+          "type": "string"
+        },
+        "destination_zone": {
+          "title": "Destination Zone",
+          "type": "string"
+        },
+        "sctg": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sctg",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin_zone",
+        "destination_zone",
+        "sctg"
+      ],
+      "title": "ExcludedFlow",
+      "type": "object"
+    },
+    "GeneralConfig": {
+      "additionalProperties": false,
+      "description": "General application settings.",
+      "properties": {
+        "train_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seed for the random parts of train generation; null draws a new one each run.",
+          "title": "Train Seed"
+        },
+        "data_output_dir": {
+          "default": "output",
+          "description": "Directory that generated data is written to.",
+          "title": "Data Output Dir",
+          "type": "string"
+        },
+        "seg_freq_arc_cost_discount_alpha": {
+          "default": 0.2,
+          "description": "Weight \u03b1 of the phase-2 discount on busy segments.",
+          "title": "Seg Freq Arc Cost Discount Alpha",
+          "type": "number"
+        },
+        "lambda": {
+          "default": 0.6,
+          "description": "Exponent \u03bb of the phase-2 discount on busy segments.",
+          "title": "Lambda",
+          "type": "number"
+        },
+        "median_f": {
+          "default": 12.0,
+          "description": "Reference count of the phase-2 discount; meant to be the median phase-1 path count over the segments used.",
+          "title": "Median F",
+          "type": "number"
+        }
+      },
+      "title": "GeneralConfig",
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "description": "City and state code.",
+      "properties": {
+        "city": {
+          "description": "City name.",
+          "title": "City",
+          "type": "string"
+        },
+        "state": {
+          "description": "Two-letter US state code normalized to uppercase.",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "city",
+        "state"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
+    "LocomotivePower": {
+      "additionalProperties": false,
+      "description": "Locomotives on a leg = hp per ton x trailing tons / `locomotive_hp`, rounded up.\nhp per ton = max(category value, (`rolling_resistance_lb_per_ton` + 20 x ruling grade %)\nx `min_speed_mph` / (375 x `transmission_efficiency`)).",
+      "properties": {
+        "locomotive_hp": {
+          "default": 4400.0,
+          "description": "Horsepower of one locomotive.",
+          "exclusiveMinimum": 0,
+          "title": "Locomotive Hp",
+          "type": "number"
+        },
+        "hp_per_ton_by_category": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "hp per trailing ton by category.",
+          "title": "Hp Per Ton By Category",
+          "type": "object"
+        },
+        "rolling_resistance_lb_per_ton": {
+          "default": 2.0,
+          "description": "Level-track resistance at low speed, lb per ton.",
+          "minimum": 0,
+          "title": "Rolling Resistance Lb Per Ton",
+          "type": "number"
+        },
+        "min_speed_mph": {
+          "default": 10.0,
+          "description": "Slowest speed accepted on a leg's ruling grade.",
+          "exclusiveMinimum": 0,
+          "title": "Min Speed Mph",
+          "type": "number"
+        },
+        "transmission_efficiency": {
+          "default": 0.82,
+          "description": "Share of a locomotive's horsepower that reaches the rails.",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Transmission Efficiency",
+          "type": "number"
+        },
+        "min_grade_hop_km": {
+          "default": 5.0,
+          "description": "Hops shorter than this (km) have no grade: elevations of nearby yards differ without a real climb.",
+          "minimum": 0,
+          "title": "Min Grade Hop Km",
+          "type": "number"
+        }
+      },
+      "title": "LocomotivePower",
+      "type": "object"
+    },
+    "NetworkConfig": {
+      "additionalProperties": false,
+      "description": "Settings controlling rail network generation.",
+      "properties": {
+        "hub_locations": {
+          "description": "Hub cities that phase-1 routes run between their hub yard groups.",
+          "items": {
+            "$ref": "#/$defs/Location"
+          },
+          "title": "Hub Locations",
+          "type": "array"
+        },
+        "hub_radius_km": {
+          "default": 50.0,
+          "description": "A hub city's hub: the largest zone yard group of its state within this many km of the city.",
+          "exclusiveMinimum": 0,
+          "title": "Hub Radius Km",
+          "type": "number"
+        },
+        "ygs_per_zone": {
+          "default": 3,
+          "description": "Most yard groups that represent one FAF zone.",
+          "minimum": 1,
+          "title": "Ygs Per Zone",
+          "type": "integer"
+        },
+        "min_od_yg_spacing_km": {
+          "default": 5.0,
+          "description": "Least track distance (km) between two yard groups of the same zone.",
+          "minimum": 0,
+          "title": "Min Od Yg Spacing Km",
+          "type": "number"
+        },
+        "min_od_yg_track_km": {
+          "default": 2.0,
+          "description": "Least track length (km) of a zone's yard group; waived for a zone with no candidate that large.",
+          "minimum": 0,
+          "title": "Min Od Yg Track Km",
+          "type": "number"
+        },
+        "excluded_track_net_codes": {
+          "description": "NTAD `NET` codes of lines the network walk skips: A abandoned, R removed, X out of service, T trail, F ferry. Applied when `graph.gexf` is built.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Track Net Codes",
+          "type": "array"
+        },
+        "max_connection_km": {
+          "default": 800.0,
+          "description": "Longest yard-to-yard connection kept on load; longer ones are mostly routes through Canada or Mexico, which have no yards.",
+          "exclusiveMinimum": 0,
+          "title": "Max Connection Km",
+          "type": "number"
+        },
+        "od_discount_factor": {
+          "default": 0.7,
+          "description": "Phase-1 cost factor on connections at a zone yard group (0.7 = 30% cheaper).",
+          "title": "Od Discount Factor",
+          "type": "number"
+        },
+        "per_grade_speed_reduction": {
+          "default": 0.1,
+          "description": "Share of speed lost per 1% of uphill grade.",
+          "title": "Per Grade Speed Reduction",
+          "type": "number"
+        },
+        "max_speed_reduction": {
+          "default": 0.5,
+          "description": "Largest share of speed lost on a grade.",
+          "title": "Max Speed Reduction",
+          "type": "number"
+        }
+      },
+      "title": "NetworkConfig",
+      "type": "object"
+    },
+    "RegionSettings": {
+      "additionalProperties": false,
+      "description": "Which part of the network an instance covers (`regions.py`).",
+      "properties": {
+        "instance": {
+          "default": "full",
+          "description": "full: the whole network. east / west: flows within the side, or between a gateway and the side, are kept whole; gateway-to-gateway flows go to the side with most of their route; crossing flows are cut where they reach the other side (`regions.py`).",
+          "enum": [
+            "full",
+            "east",
+            "west"
+          ],
+          "title": "Instance",
+          "type": "string"
+        },
+        "west_states": {
+          "description": "States of the West (west bank of the Mississippi, Wisconsin, and everything west); the rest is the East.",
+          "items": {
+            "type": "string"
+          },
+          "title": "West States",
+          "type": "array"
+        },
+        "gateway_zones": {
+          "description": "FAF zones of the gateway cities, in both regions: Chicago (171, 181), St. Louis (172, 292), Kansas City (201, 291), Memphis (471), New Orleans (223).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Gateway Zones",
+          "type": "array"
+        },
+        "gateway_radius_km": {
+          "default": 25.0,
+          "description": "Yard groups within this many km of a gateway zone's yard group are in both regions.",
+          "exclusiveMinimum": 0,
+          "title": "Gateway Radius Km",
+          "type": "number"
+        }
+      },
+      "title": "RegionSettings",
+      "type": "object"
+    },
+    "ServiceDesignSettings": {
+      "additionalProperties": false,
+      "description": "All knobs of the service-design generator.",
+      "properties": {
+        "multimodal_rail_share": {
+          "default": 0.5,
+          "description": "Share of a FAF 'multiple modes' row's tons that moves by rail (the intermodal group).",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Multimodal Rail Share",
+          "type": "number"
+        },
+        "multimodal_min_miles": {
+          "default": 500.0,
+          "description": "Multiple-modes rows count only on zone pairs averaging at least this many miles (FAF5); pairs with no FAF5 distance are dropped. 0 counts all.",
+          "minimum": 0.0,
+          "title": "Multimodal Min Miles",
+          "type": "number"
+        },
+        "multimodal_max_miles": {
+          "default": 2500.0,
+          "description": "Multiple-modes rows do not count on zone pairs averaging more than this many miles (coast to coast is not one train). 0 = no limit.",
+          "minimum": 0.0,
+          "title": "Multimodal Max Miles",
+          "type": "number"
+        },
+        "region": {
+          "$ref": "#/$defs/RegionSettings"
+        },
+        "excluded_zones": {
+          "description": "FAF zones whose rows are dropped, as origin or destination. 020 Alaska: its track is not connected to the rest.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Zones",
+          "type": "array"
+        },
+        "freight_groups": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "SCTG2 codes of each freight group (rail rows); unlisted codes are manifest, multiple-modes rows intermodal.",
+          "title": "Freight Groups",
+          "type": "object"
+        },
+        "shared_bulk": {
+          "default": true,
+          "description": "true: the B groups of a zone pair are one flow and ride `bulk` trains; false: each group is its own flow, on its own trains (coal on coal trains, ...), and must reach `min_od_tons_per_week` alone.",
+          "title": "Shared Bulk",
+          "type": "boolean"
+        },
+        "train_type_category": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Output category (A/M/B/I, the symbol prefix) of each freight group and its train type. Each group rides only its own train type; each category is solved on its own.",
+          "title": "Train Type Category",
+          "type": "object"
+        },
+        "excluded_flows": {
+          "description": "FAF flows left out of demand (origin zone, destination zone, SCTG codes), with a reason for the report.",
+          "items": {
+            "$ref": "#/$defs/ExcludedFlow"
+          },
+          "title": "Excluded Flows",
+          "type": "array"
+        },
+        "intra_zone_min_miles": {
+          "default": 25.0,
+          "description": "Intra-zone FAF rows averaging fewer miles (FAF5) are local switching and dropped; rows with no FAF5 distance are kept.",
+          "title": "Intra Zone Min Miles",
+          "type": "number"
+        },
+        "min_od_tons_per_week": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Per category: a train type's tons/week on a zone pair below this are dropped, before the yard-pair split (without `shared_bulk`, each B group on its own); unlisted categories keep all.",
+          "title": "Min Od Tons Per Week",
+          "type": "object"
+        },
+        "yard_pairs": {
+          "$ref": "#/$defs/YardPairRule"
+        },
+        "work_yards_per_state": {
+          "default": 3,
+          "description": "Besides zone yards, the N largest yard groups per state may host work events.",
+          "minimum": 0,
+          "title": "Work Yards Per State",
+          "type": "integer"
+        },
+        "max_trailing_tons_per_run_by_category": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Max trailing tons (freight + cars) of a run on any leg, by category; the freight limit is this / (1 + empty car tons / cargo tons per car).",
+          "title": "Max Trailing Tons Per Run By Category",
+          "type": "object"
+        },
+        "max_runs_per_week": {
+          "default": 7,
+          "description": "Most runs a week of one symbol (one a day); a service's runs are split into symbols of this many.",
+          "title": "Max Runs Per Week",
+          "type": "integer"
+        },
+        "max_symbols_per_service": {
+          "default": 3,
+          "description": "Most parallel symbols of one service (runs <= max_runs_per_week x this).",
+          "title": "Max Symbols Per Service",
+          "type": "integer"
+        },
+        "costs": {
+          "$ref": "#/$defs/Costs"
+        },
+        "crew": {
+          "$ref": "#/$defs/CrewRule"
+        },
+        "dwell_minutes": {
+          "$ref": "#/$defs/DwellMinutes"
+        },
+        "car_weight": {
+          "$ref": "#/$defs/CarWeight"
+        },
+        "locomotive_power": {
+          "$ref": "#/$defs/LocomotivePower"
+        },
+        "circuitous_trains": {
+          "$ref": "#/$defs/CircuitousTrains"
+        },
+        "solver": {
+          "$ref": "#/$defs/SolverSettings"
+        }
+      },
+      "title": "ServiceDesignSettings",
+      "type": "object"
+    },
+    "SolverSettings": {
+      "additionalProperties": false,
+      "description": "Gurobi settings, for each category's model.",
+      "properties": {
+        "time_limit_s": {
+          "default": 600.0,
+          "description": "Time limit of each category's solve (s); the best solution found is used.",
+          "title": "Time Limit S",
+          "type": "number"
+        },
+        "mip_gap": {
+          "default": 0.02,
+          "description": "Relative gap at which a category's solve stops.",
+          "title": "Mip Gap",
+          "type": "number"
+        },
+        "log_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "gurobi_service_design.log",
+          "description": "null: console only. Otherwise each category logs to gurobi_<category>.log in the run's folder under gurobi_solutions/ (this name is not used).",
+          "title": "Log File"
+        }
+      },
+      "title": "SolverSettings",
+      "type": "object"
+    },
+    "TrainConfig": {
+      "additionalProperties": false,
+      "description": "Settings controlling train generation.",
+      "properties": {
+        "speed_km_h": {
+          "default": 40,
+          "description": "Speed (km/h) for the routing costs and the minutes of `distance_matrix.csv`; it does not change the routes.",
+          "title": "Speed Km H",
+          "type": "integer"
+        },
+        "speed_km_h_by_category": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Average speed (km/h) of a train of each category between yards, delays on the line included; sets the schedule's times and crew changes.",
+          "title": "Speed Km H By Category",
+          "type": "object"
+        }
+      },
+      "title": "TrainConfig",
+      "type": "object"
+    },
+    "YardPairRule": {
+      "additionalProperties": false,
+      "description": "Which of a zone pair's candidate yard pairs carry its tons.",
+      "properties": {
+        "assignment": {
+          "default": "one_per_category",
+          "description": "split_by_tonnage: n = min(max_pairs, ceil(tons / tonnage_step)) yard pairs, each category split over them by yard size. one_per_category: one yard pair per category, the largest pair (origin x destination track) to the heaviest category.",
+          "enum": [
+            "split_by_tonnage",
+            "one_per_category"
+          ],
+          "title": "Assignment",
+          "type": "string"
+        },
+        "tonnage_step": {
+          "default": 11000.0,
+          "description": "split_by_tonnage only: tons/week per extra yard pair.",
+          "title": "Tonnage Step",
+          "type": "number"
+        },
+        "distance_tolerance": {
+          "default": 0.15,
+          "description": "Between two zones, yard pairs whose route cost is over (1 + this) x the cheapest are left out.",
+          "title": "Distance Tolerance",
+          "type": "number"
+        },
+        "max_pairs": {
+          "default": 3,
+          "description": "split_by_tonnage only.",
+          "minimum": 1,
+          "title": "Max Pairs",
+          "type": "integer"
+        },
+        "min_route_km": {
+          "default": 40.0,
+          "description": "Local-train distance (km). Inter-zone: yard pairs with a shorter route are not candidates; a zone pair with none left is dropped. Intra-zone: tons whose assigned yard pair is shorter are dropped.",
+          "minimum": 0,
+          "title": "Min Route Km",
+          "type": "number"
+        }
+      },
+      "title": "YardPairRule",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root of `schedule_config.yaml`.",
+  "properties": {
+    "general_settings": {
+      "$ref": "#/$defs/GeneralConfig"
+    },
+    "network_settings": {
+      "$ref": "#/$defs/NetworkConfig"
+    },
+    "train_settings": {
+      "$ref": "#/$defs/TrainConfig"
+    },
+    "service_design_settings": {
+      "$ref": "#/$defs/ServiceDesignSettings",
+      "description": "Settings of the train generator (service network design)."
+    }
+  },
+  "title": "Config",
+  "type": "object"
+}

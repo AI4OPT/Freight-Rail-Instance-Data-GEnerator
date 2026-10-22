@@ -72,7 +72,7 @@ def generate_scenarios(
         )
         raise typer.Exit(1)
     try:
-        _, config = load_scenario_config(config_file)
+        config = load_scenario_config(config_file)
         print(f"[green]Loaded config from[/green] [blue]{config_file}[/blue]")
     except (FileNotFoundError, ValidationError) as e:
         print(f"[red]Invalid configuration file:[/red] {e}")

@@ -1,12 +1,9 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-DAYS_IN_WEEK = 7
 MINUTES_PER_HOUR = 60
-HOURS_PER_DAY = 24
 
 MINUTES_PER_DAY = 24 * 60
-HOURS_PER_WEEK = 7 * 24
 MINUTES_PER_WEEK = 7 * 24 * 60
 
 
@@ -63,10 +60,6 @@ def get_min_from_day_and_HHMM(elapsed_day_str: str, hhmm: HourMinute) -> int:
         raise ValueError(f"Invalid minute value in HH:MM format: {hhmm}")
 
     return minute + (hour * MINUTES_PER_HOUR) + ((day - 1) * MINUTES_PER_DAY)
-
-
-def meters_to_kilometers(meters: float) -> float:
-    return meters / 1000
 
 
 def kilometers_to_meters(kilometers: float) -> float:

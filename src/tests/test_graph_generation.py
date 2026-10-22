@@ -2,22 +2,28 @@
 
 import networkx as nx
 
+from railgen.faf_data import LazyLoad
 from railgen.models import (
     Coord,
     YardGroup,
     YgKey,
+    ZoneCode,
     rail_network_adapter,
     yg_adapter,
 )
+from railgen.rail_network_gen import graph_generation
 from railgen.rail_network_gen.graph_generation import (
+    _assign_od_yard_groups,
     _spaced,
     _track_closeness,
     _with_min_track,
-    _zone_yard_groups_table,
+    drop_bypassed_edges,
+    drop_long_edges,
     drop_redundant_edges,
     merge_graph_nodes,
     merge_yard_group_records,
     traverse_graph,
+    warn_unmatched_changes,
 )
 
 
@@ -245,7 +251,42 @@ def test_walk_handles_two_points_at_the_same_distance():
     assert set(edges) == {frozenset(("A-1", "S-1")), frozenset(("S-1", "C-1"))}
 
 
-# --- Choice of zone yard groups (pure pieces) ------------------------------------------
+def test_long_edges_are_dropped():
+    graph = _graph([("A", "B", 900.0), ("B", "C", 300.0), ("C", "D", 500.0)])
+    assert _edges(drop_long_edges(graph, 500.0)) == {
+        frozenset(("B", "C")),
+        frozenset(("C", "D")),
+    }
+
+
+def test_edge_bypassed_through_several_yards_is_dropped():
+    # A-D is 100 km; A-B-C-D is 102 km over two other yard groups (within 3%); D-E has no bypass.
+    graph = _graph(
+        [
+            ("A", "D", 100.0),
+            ("A", "B", 40.0),
+            ("B", "C", 30.0),
+            ("C", "D", 32.0),
+            ("D", "E", 50.0),
+        ]
+    )
+    assert _edges(drop_bypassed_edges(graph)) == {
+        frozenset(("A", "B")),
+        frozenset(("B", "C")),
+        frozenset(("C", "D")),
+        frozenset(("D", "E")),
+    }
+    # At 98 km A-D is more than 3% shorter than the 102-km path, so it stays.
+    assert frozenset(("A", "D")) in _edges(
+        drop_bypassed_edges(
+            _graph(
+                [("A", "D", 98.0), ("A", "B", 40.0), ("B", "C", 30.0), ("C", "D", 32.0)]
+            )
+        )
+    )
+
+
+# --- Choice of zone yard groups --------------------------------------------------------
 
 
 def test_spaced_skips_candidates_too_close_to_one_already_taken():
@@ -268,29 +309,61 @@ def test_min_track_filters_small_yards_and_is_waived_when_none_is_large_enough()
         YgKey("BIG"): _yard("BIG", 22.0),
         YgKey("TINY"): _yard("TINY", 1.8),
     }
-    nearest_first = [YgKey("SMALL"), YgKey("BIG"), YgKey("TINY")]
-    assert _with_min_track(nearest_first, yards, 2.0) == ["BIG"]
+    in_order = [YgKey("SMALL"), YgKey("BIG"), YgKey("TINY")]
+    assert _with_min_track(in_order, yards, 2.0) == ["BIG"]
     assert _with_min_track([YgKey("SMALL"), YgKey("TINY")], yards, 2.0) == [
         "SMALL",
         "TINY",
     ]
 
 
-def test_zone_table_escapes_latex_characters_and_marks_empty_zones():
-    table = _zone_yard_groups_table(
-        [
-            (
-                "172",
-                "East St. Louis, IL",
-                1,
-                [("WIGGINS #2-2005", 6.17), ("A&B-1", 2.0)],
-            ),
-            ("151", "Honolulu, HI", 2, []),
-        ]
+def test_each_zone_takes_its_largest_yard_groups_inside_it(monkeypatch):
+    monkeypatch.setattr(
+        graph_generation,
+        "FAF_OD_ZONE_CODES",
+        LazyLoad(
+            lambda: frozenset({ZoneCode("171"), ZoneCode("179"), ZoneCode("109")})
+        ),
     )
-    assert (
-        r"172 & East St. Louis, IL & 1 & WIGGINS \#2-2005 (6.2); A\&B-1 (2.0) \\"
-        in table
+    tracks = {
+        "BIG": 60.0,
+        "MID": 30.0,
+        "BARRED": 90.0,
+        "SMALL": 1.0,
+        "RURAL": 40.0,
+        "NOFREIGHT": 50.0,
+        "OUTSIDE": 70.0,
+    }
+    yards = {YgKey(n): _yard(n, km) for n, km in tracks.items()}
+    zones: dict[YgKey, ZoneCode | None] = {
+        YgKey("BIG"): ZoneCode("171"),
+        YgKey("MID"): ZoneCode("171"),
+        YgKey("BARRED"): ZoneCode("171"),
+        YgKey("SMALL"): ZoneCode("171"),
+        YgKey("RURAL"): ZoneCode("179"),
+        YgKey("NOFREIGHT"): ZoneCode("999"),
+        YgKey("OUTSIDE"): None,
+    }
+    stats = _assign_od_yard_groups(
+        yards,
+        zones,
+        ygs_per_zone=3,
+        min_track_km=2.0,
+        barred={YgKey("BARRED")},
     )
-    assert r"151 & Honolulu, HI & 2 & none \\" in table
-    assert table.startswith("%") and table.rstrip().endswith(r"\end{longtable}")
+    picked = {n: yg.od_zone_code for n, yg in yards.items() if yg.od_zone_code}
+    assert picked == {"BIG": "171", "MID": "171", "RURAL": "179"}
+    assert stats.zones_total == 3
+    assert stats.zones_represented == 2
+    assert stats.zones_unrepresented == ["109"]
+    assert stats.zones_under_target == 2
+    assert stats.yard_groups_designated == 3
+
+
+def test_unmatched_changes_are_reported(capsys):
+    records = {YgKey("A-1"): _yard("A", 1.0), YgKey("B-2"): _yard("B", 1.0)}
+    merges = {YgKey("A-1"): YgKey("B-2"), YgKey("C-3"): YgKey("B-2")}
+    missing = warn_unmatched_changes(records, merges, {YgKey("D-4")}, {YgKey("B-2")})
+    assert missing == ["C-3", "D-4"]
+    assert "2 yard group(s)" in capsys.readouterr().out
+    assert warn_unmatched_changes(records, {}, set(), set()) == []

@@ -1,7 +1,6 @@
 """Plain-text summary of generated scenarios, written next to `scenario.json`."""
 
 from collections import defaultdict
-from itertools import pairwise
 from pathlib import Path
 
 import numpy
@@ -38,12 +37,7 @@ def report_lines(
     A train run is one sample of one train on one day it runs.
     """
     settings = config.general_settings
-    planned_dwells = [
-        cur.dep_minute - prev.arvl_minute
-        for train in trains
-        for prev, cur in pairwise(train.trips)
-    ]
-    short_dwells = sum(d < settings.minimum_dwell_time_minutes for d in planned_dwells)
+    stops = sum(len(train.trips) - 1 for train in trains)
 
     # Per category: first departure delays, final arrival delays, number of legs, one entry per train run
     runs: dict[str, tuple[list[int], list[int], list[int]]] = defaultdict(
@@ -72,9 +66,8 @@ def report_lines(
         f"train symbols: {len(trains):,}, legs: {sum(len(t.trips) for t in trains):,}",
         f"train runs: {len(all_runs[0]):,}",
         (
-            f"intermediate stops: {len(planned_dwells):,}, of which {short_dwells:,} have a planned dwell under the minimum dwell "
-            f"({settings.minimum_dwell_time_minutes} min); these are lengthened to the minimum in every sample, "
-            "which adds delay even when every distribution has mean 0"
+            f"intermediate stops: {stops:,}; minimum dwell {settings.minimum_dwell_share:.0%} "
+            "of the planned dwell, the rest is a buffer late trains use to recover"
         ),
     ]
     for key in sorted(runs, key=lambda k: (k == "All categories", k)):

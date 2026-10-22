@@ -24,57 +24,32 @@ class TrainCategoryStats:
 
 
 @dataclass(kw_only=True, slots=True)
-class OdPassStats:
-    """What one pass of the OD yard group assignment achieved."""
-
-    zones: int = 0
-    yard_groups: int = 0
-    zones_under_target: int = 0
-
-
-@dataclass(kw_only=True, slots=True)
 class OdAssignmentStats:
-    """How FAF zones were mapped onto yard groups. Built in `_assign_od_yard_groups` and carried on the RailNetwork into the run stats."""
+    """How FAF zones were mapped onto yard groups."""
 
     ygs_per_zone: int = 0
-    max_fallback_km: float = 0.0
-    zones_total: int = 0
+    zones_total: int = 0  # zones that send or receive rail or multimodal freight
     zones_represented: int = 0
-    zones_unrepresented: list[ZoneCode] = field(default_factory=list)
+    zones_unrepresented: list[ZoneCode] = field(
+        default_factory=list
+    )  # no yard group inside
+    zones_under_target: int = 0  # represented by fewer than `ygs_per_zone`
     yard_groups_designated: int = 0
-    # One entry per pass, in the order they run.
-    city_match: OdPassStats = field(default_factory=OdPassStats)
-    nearest_within_radius: OdPassStats = field(default_factory=OdPassStats)
-    rest_of_state: OdPassStats = field(default_factory=OdPassStats)
 
     def print_summary(self) -> None:
-        """Print the per-pass breakdown."""
-        labels = (
-            ("pass 1 (city match)", self.city_match),
-            (
-                f"pass 2 (within {self.max_fallback_km:.0f} km)",
-                self.nearest_within_radius,
-            ),
-            ("pass 3 (rest of state)", self.rest_of_state),
+        """Print the totals."""
+        under = (
+            f", {self.zones_under_target} by fewer than {self.ygs_per_zone}"
+            if self.zones_under_target
+            else ""
         )
-        for label, s in labels:
-            under = (
-                f" ({s.zones_under_target} under target of {self.ygs_per_zone})"
-                if s.zones_under_target
-                else ""
-            )
-            print(
-                f"[OD] {label:<26}: {s.zones:3d} zones -> {s.yard_groups:3d} yard groups{under}"
-            )
+        unrepresented = (
+            f": {self.zones_unrepresented}" if self.zones_unrepresented else "."
+        )
         print(
-            f"[OD] total: {self.zones_represented} of {self.zones_total} zones represented "
-            f"by {self.yard_groups_designated} yard groups; "
-            f"{len(self.zones_unrepresented)} unrepresented"
-            + (
-                f": {sorted(self.zones_unrepresented)}"
-                if self.zones_unrepresented
-                else "."
-            )
+            f"[OD] {self.zones_represented} of {self.zones_total} zones represented by "
+            f"{self.yard_groups_designated} yard groups{under}; "
+            f"{len(self.zones_unrepresented)} unrepresented{unrepresented}"
         )
 
 

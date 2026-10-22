@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from railgen.constants import FAF5_CSV_NAME, FAF6_CSV_NAME
+from railgen.constants import FAF5_CSV_NAME, FAF6_CSV_NAME, FAF_YEAR
 from railgen.constants import INPUT_DATA_DIR as DATA_DIR
 from railgen.faf_data import ensure_faf5_file, ensure_faf6_files
 from railgen.models import YgKey, ZoneCode
@@ -23,7 +23,7 @@ MULTIMODAL_MODE = "5"  # FAF dms_mode "Multiple modes & mail"
 class Commodity:
     origin: YgKey
     destination: YgKey
-    group: str
+    train_type: str  # its freight group, or `bulk` for all B groups with `shared_bulk`
     tons_per_week: float
     zone_pair: tuple[ZoneCode, ZoneCode]
 
@@ -34,6 +34,7 @@ class FafRow:
     destination_zone: ZoneCode
     sctg: str
     mode: str  # RAIL_MODE or MULTIMODAL_MODE
+    trade_type: str  # FAF trade_type: "1" domestic, "2" import, "3" export
     tons_per_week: float
 
 
@@ -55,8 +56,10 @@ class SmallFlowDrop:
     """Zone-pair flows of one category below its minimum (before the yard-pair split)."""
 
     threshold: float  # tons/week
-    ods_below: int  # zone pairs of the category below the threshold (all dropped)
-    ods_total: int  # zone pairs of the category before dropping
+    # Zone pairs of the category below the threshold (dropped) and in all; without
+    # `shared_bulk` a B zone pair counts once per bulk group.
+    ods_below: int
+    ods_total: int
     tons_dropped: float  # tons/week
     tons_total: float  # tons/week of the category before dropping
 
@@ -71,7 +74,9 @@ class DemandReport:
     """Tons kept and dropped at each step, for the generation stats."""
 
     faf_tons: float = 0.0
-    excluded_tons: dict[str, float] = field(default_factory=dict)
+    excluded_tons: dict[int, float] = field(
+        default_factory=dict
+    )  # by index in `excluded_flows`
     local_switching_tons: float = 0.0
     local_switching_rows: int = 0  # FAF rows dropped as local switching
     intra_zone_tons: float = 0.0  # all intra-zone tons read, before any drop
@@ -89,16 +94,18 @@ class DemandReport:
     no_yard_pair_tons: float = (
         0.0  # inter-zone tons of zone pairs with no routed yard pair
     )
+    short_inter_tons: float = 0.0  # inter-zone: every yard pair under `min_route_km`
+    short_intra_tons: float = 0.0  # intra-zone: assigned yard pair under `min_route_km`
     small_od_flows: dict[str, SmallFlowDrop] = field(default_factory=dict)
-    # one_per_category only: zone pairs with fewer eligible yard pairs than categories
-    zone_pairs_sharing_a_yard_pair: int = 0
     kept_tons: float = 0.0
+    # Kept tons (after every drop) by FAF mode and trade type
+    kept_by_mode_trade: dict[tuple[str, str], float] = field(default_factory=dict)
     zone_pairs: int = 0
     commodities: int = 0
     region: RegionReport | None = None  # east / west instances only
 
 
-def read_faf_rows(year: str, multimodal_rail_share: float) -> Iterator[FafRow]:
+def read_faf_rows(multimodal_rail_share: float) -> Iterator[FafRow]:
     """Rail and multimodal rows of the FAF CSV (every trade type), in tons per week.
 
     For imports and exports only the domestic part of the move is used (`dms_orig`,
@@ -110,7 +117,7 @@ def read_faf_rows(year: str, multimodal_rail_share: float) -> Iterator[FafRow]:
             mode = r["dms_mode"].strip()
             if mode not in (RAIL_MODE, MULTIMODAL_MODE):
                 continue
-            tons = float(r[f"tons_{year}"] or 0)
+            tons = float(r[f"tons_{FAF_YEAR}"] or 0)
             if mode == MULTIMODAL_MODE:
                 tons *= multimodal_rail_share
             if tons <= 0:
@@ -120,13 +127,12 @@ def read_faf_rows(year: str, multimodal_rail_share: float) -> Iterator[FafRow]:
                 destination_zone=ZoneCode(r["dms_dest"].strip()),
                 sctg=r["sctg2"].strip().zfill(2),
                 mode=mode,
+                trade_type=r["trade_type"].strip(),
                 tons_per_week=tons * 1000 / 52,
             )
 
 
-def read_faf_miles(
-    year: str,
-) -> tuple[IntraZoneMiles, dict[tuple[ZoneCode, ZoneCode], float]]:
+def read_faf_miles() -> tuple[IntraZoneMiles, dict[tuple[ZoneCode, ZoneCode], float]]:
     """Average shipment miles from FAF5 (1000 * ton-miles / tons), every trade type.
 
     Returns the miles of the intra-zone rail and multimodal flows.
@@ -141,10 +147,10 @@ def read_faf_miles(
             mode = r["dms_mode"].strip()
             if mode not in (RAIL_MODE, MULTIMODAL_MODE):
                 continue
-            t = float(r[f"tons_{year}"] or 0)
+            t = float(r[f"tons_{FAF_YEAR}"] or 0)
             if t <= 0:
                 continue
-            tm = float(r[f"tmiles_{year}"] or 0)
+            tm = float(r[f"tmiles_{FAF_YEAR}"] or 0)
             zone, dest = r["dms_orig"].strip(), r["dms_dest"].strip()
             if mode == MULTIMODAL_MODE:
                 pair_tons[(zone, dest)] += t
@@ -235,7 +241,7 @@ def select_yard_pairs(
 
 
 def assign_pair_per_category(
-    candidates: list[tuple[YgKey, YgKey, float]],
+    candidates: list[CandidateYardPair],
     category_tons: dict[str, float],
     size: dict[YgKey, float],
     *,
@@ -243,15 +249,15 @@ def assign_pair_per_category(
 ) -> dict[str, tuple[YgKey, YgKey]]:
     """One yard pair per category of a zone pair.
 
-    `candidates` are (origin, destination, route cost). Pairs costing more than
+    `candidates` carry the route cost as `value`. Pairs costing more than
     (1 + `distance_tolerance`) x the cheapest are dropped first. Then the biggest pair
     (origin x destination track length) goes to the heaviest category, etc.
     """
     if distance_tolerance is not None:
-        limit = min(c[2] for c in candidates) * (1 + distance_tolerance)
-        candidates = [c for c in candidates if c[2] <= limit]
+        limit = min(c.value for c in candidates) * (1 + distance_tolerance)
+        candidates = [c for c in candidates if c.value <= limit]
     pairs = sorted(
-        ((o, d) for o, d, _cost in candidates),
+        ((c.origin, c.dest) for c in candidates),
         key=lambda p: (-size.get(p[0], 0.0) * size.get(p[1], 0.0), p[0], p[1]),
     )
     ranked = sorted(category_tons, key=lambda c: (-category_tons[c], c))
@@ -275,27 +281,31 @@ def build_commodities(
     """Commodities, the demand report, and the route of every kept yard pair."""
     report = DemandReport()
     excluded = {
-        (e.origin_zone, e.destination_zone, code): e.reason
-        for e in settings.excluded_flows
+        (e.origin_zone, e.destination_zone, code): i
+        for i, e in enumerate(settings.excluded_flows)
         for code in e.sctg
     }
 
     tons: dict[tuple[ZoneCode, ZoneCode, str], float] = defaultdict(float)
-    # Per (zone, group), over the intra-zone tons that have a FAF5 distance.
+    # The same tons by FAF trade type, for the report of what is kept
+    tons_by_trade: dict[tuple[ZoneCode, ZoneCode, str], dict[str, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    # Per (zone, train type), over the intra-zone tons that have a FAF5 distance.
     ton_miles_intra: dict[tuple[ZoneCode, str], float] = defaultdict(float)
     tons_with_miles: dict[tuple[ZoneCode, str], float] = defaultdict(float)
-    intra_miles, multimodal_miles = read_faf_miles(settings.faf_year)
+    intra_miles, multimodal_miles = read_faf_miles()
     excluded_zones = set(settings.excluded_zones)
-    for row in read_faf_rows(settings.faf_year, settings.multimodal_rail_share):
+    for row in read_faf_rows(settings.multimodal_rail_share):
         report.faf_tons += row.tons_per_week
         if row.origin_zone in excluded_zones or row.destination_zone in excluded_zones:
             report.excluded_zone_tons += row.tons_per_week
             continue
         key = (row.origin_zone, row.destination_zone, row.sctg)
         if key in excluded:
-            label = f"{row.origin_zone}->{row.destination_zone} sctg {row.sctg}"
-            report.excluded_tons[label] = (
-                report.excluded_tons.get(label, 0.0) + row.tons_per_week
+            i = excluded[key]
+            report.excluded_tons[i] = (
+                report.excluded_tons.get(i, 0.0) + row.tons_per_week
             )
             continue
         intra = row.origin_zone == row.destination_zone
@@ -322,15 +332,21 @@ def build_commodities(
                     report.short_multimodal_tons += row.tons_per_week
                     report.short_multimodal_rows += 1
                 continue
-        group = (
+        # Freight of one train type is one flow (with `shared_bulk`, all B groups together).
+        train_type = settings.train_type_of(
             INTERMODAL_GROUP
             if row.mode == MULTIMODAL_MODE
             else settings.group_of(row.sctg)
         )
-        tons[(row.origin_zone, row.destination_zone, group)] += row.tons_per_week
+        tons[(row.origin_zone, row.destination_zone, train_type)] += row.tons_per_week
+        tons_by_trade[(row.origin_zone, row.destination_zone, train_type)][
+            row.trade_type
+        ] += row.tons_per_week
         if avg_miles is not None:
-            ton_miles_intra[(row.origin_zone, group)] += row.tons_per_week * avg_miles
-            tons_with_miles[(row.origin_zone, group)] += row.tons_per_week
+            ton_miles_intra[(row.origin_zone, train_type)] += (
+                row.tons_per_week * avg_miles
+            )
+            tons_with_miles[(row.origin_zone, train_type)] += row.tons_per_week
 
     zone_to_ygs: dict[ZoneCode, list[YgKey]] = defaultdict(list)
     size: dict[YgKey, float] = {}
@@ -340,8 +356,8 @@ def build_commodities(
             size[key] = yg.shape_length_km
 
     by_pair: dict[tuple[ZoneCode, ZoneCode], dict[str, float]] = defaultdict(dict)
-    for (oz, dz, g), t in tons.items():
-        by_pair[(oz, dz)][g] = t
+    for (oz, dz, tt), t in tons.items():
+        by_pair[(oz, dz)][tt] = t
 
     yard_pairs = {
         (o, d)
@@ -354,7 +370,7 @@ def build_commodities(
 
     routes_of: dict[tuple[ZoneCode, ZoneCode], list[tuple[YgKey, YgKey, Route]]] = {}
     placeable: dict[tuple[ZoneCode, ZoneCode], dict[str, float]] = {}
-    for (oz, dz), groups in sorted(by_pair.items()):
+    for (oz, dz), types in sorted(by_pair.items()):
         pair_routes = [
             (o, d, routes[(o, d)])
             for o in zone_to_ygs.get(oz, [])
@@ -363,53 +379,61 @@ def build_commodities(
         ]
         if not pair_routes:
             if oz == dz:
-                report.no_second_yard_tons += sum(groups.values())
+                report.no_second_yard_tons += sum(types.values())
             else:
-                report.no_yard_pair_tons += sum(groups.values())
+                report.no_yard_pair_tons += sum(types.values())
             continue
+        if oz != dz:
+            pair_routes = [
+                p for p in pair_routes if p[2].km >= settings.yard_pairs.min_route_km
+            ]
+            if not pair_routes:
+                report.short_inter_tons += sum(types.values())
+                continue
         routes_of[(oz, dz)] = pair_routes
-        placeable[(oz, dz)] = groups
+        placeable[(oz, dz)] = types
     kept_by_pair, report.small_od_flows = drop_small_zone_pair_flows(
         placeable, settings
     )
-
     rule = settings.yard_pairs
     commodities: list[Commodity] = []
     kept_routes: dict[tuple[YgKey, YgKey], Route] = {}
-    category = settings.train_type_category
-    for (oz, dz), groups in kept_by_pair.items():
-        total = sum(groups.values())
+    category = settings.category_of
+    for (oz, dz), types in kept_by_pair.items():
+        total = sum(types.values())
         pair_routes = routes_of[(oz, dz)]
         if rule.assignment == "one_per_category":
             category_tons: dict[str, float] = defaultdict(float)
-            for g, t in groups.items():
-                category_tons[category[g]] += t
+            for tt, t in types.items():
+                category_tons[category(tt)] += t
             pair_of = assign_pair_per_category(
-                [(o, d, r.cost) for o, d, r in pair_routes],
+                [
+                    CandidateYardPair(origin=o, dest=d, value=r.cost)
+                    for o, d, r in pair_routes
+                ],
                 category_tons,
                 size,
                 distance_tolerance=None if oz == dz else rule.distance_tolerance,
             )
-            if len(set(pair_of.values())) < len(pair_of):
-                report.zone_pairs_sharing_a_yard_pair += 1
-            report.zone_pairs += 1
-            report.kept_tons += total
-            for g, t in groups.items():
-                o, d = pair_of[category[g]]
+            for tt, t in types.items():
+                o, d = pair_of[category(tt)]
+                if oz == dz and routes[(o, d)].km < rule.min_route_km:
+                    report.short_intra_tons += t
+                    continue
                 kept_routes[(o, d)] = routes[(o, d)]
                 commodities.append(
                     Commodity(
                         origin=o,
                         destination=d,
-                        group=g,
+                        train_type=tt,
                         tons_per_week=t,
                         zone_pair=(oz, dz),
                     )
                 )
             continue
-        with_miles = sum(tons_with_miles[(oz, g)] for g in groups) if oz == dz else 0.0
+        with_miles = sum(tons_with_miles[(oz, tt)] for tt in types) if oz == dz else 0.0
         if with_miles > 0:
-            avg_miles = sum(ton_miles_intra[(oz, g)] for g in groups) / with_miles
+            avg_miles = sum(ton_miles_intra[(oz, tt)] for tt in types) / with_miles
             pairs = select_yard_pairs(
                 [
                     CandidateYardPair(origin=o, dest=d, value=r.km)
@@ -433,20 +457,35 @@ def build_commodities(
                 distance_tolerance=rule.distance_tolerance,
             )
         shares = split_by_size(pairs, size)
-        report.zone_pairs += 1
-        report.kept_tons += total
         for (o, d), share in zip(pairs, shares):
+            if oz == dz and routes[(o, d)].km < rule.min_route_km:
+                report.short_intra_tons += total * share
+                continue
             kept_routes[(o, d)] = routes[(o, d)]
-            for g, t in groups.items():
+            for tt, t in types.items():
                 commodities.append(
                     Commodity(
                         origin=o,
                         destination=d,
-                        group=g,
+                        train_type=tt,
                         tons_per_week=t * share,
                         zone_pair=(oz, dz),
                     )
                 )
+    # Kept tons by FAF mode and trade type, each commodity split like its zone-pair flow.
+    kept_by_mode_trade: dict[tuple[str, str], float] = defaultdict(float)
+    for c in commodities:
+        mode = MULTIMODAL_MODE if c.train_type == INTERMODAL_GROUP else RAIL_MODE
+        by_trade = tons_by_trade[(*c.zone_pair, c.train_type)]
+        flow = sum(by_trade.values())
+        if flow <= 0:
+            continue
+        for trade, t in by_trade.items():
+            kept_by_mode_trade[(mode, trade)] += t * c.tons_per_week / flow
+    report.kept_by_mode_trade = dict(kept_by_mode_trade)
+    report.kept_tons = sum(c.tons_per_week for c in commodities)
+    report.zone_pairs = len({c.zone_pair for c in commodities})
+
     if settings.region.instance != "full":
         commodities, kept_routes, report.region = cut_to_region(
             commodities, kept_routes, network, settings
@@ -459,37 +498,34 @@ def drop_small_zone_pair_flows(
     by_pair: dict[tuple[ZoneCode, ZoneCode], dict[str, float]],
     settings: ServiceDesignSettings,
 ) -> tuple[dict[tuple[ZoneCode, ZoneCode], dict[str, float]], dict[str, SmallFlowDrop]]:
-    """Drop (zone pair, category) flows below `min_od_tons_per_week`.
+    """Drop the flows of a zone pair below their category's `min_od_tons_per_week`.
 
-    A flow sums all freight groups of one category on a zone pair (e.g. all bulk for B).
-    Also returns per-category counts from before the drop. Zone pairs left empty go away.
+    A flow is one train type's tons on the zone pair, so the minimum is what justifies a
+    train of that type: with `shared_bulk` all bulk of the zone pair together, without it
+    each bulk group on its own. Also returns per-category counts from before the drop.
+    Zone pairs left empty go away.
     """
-    category = settings.train_type_category
-    flow_tons: dict[tuple[tuple[ZoneCode, ZoneCode], str], float] = defaultdict(float)
-    for zone_pair, groups in by_pair.items():
-        for g, t in groups.items():
-            flow_tons[(zone_pair, category[g])] += t
-
     minimum = settings.min_od_tons_per_week
-    small = {key for key, t in flow_tons.items() if t < minimum.get(key[1], 0.0)}
+    flows = [
+        (zone_pair, tt, t, settings.category_of(tt))
+        for zone_pair, types in by_pair.items()
+        for tt, t in types.items()
+    ]
     report: dict[str, SmallFlowDrop] = {}
     for cat, threshold in minimum.items():
-        keys = [key for key in flow_tons if key[1] == cat]
-        below = [key for key in keys if key in small]
+        own = [t for _zp, _g, t, c in flows if c == cat]
+        below = [t for t in own if t < threshold]
         report[cat] = SmallFlowDrop(
             threshold=threshold,
             ods_below=len(below),
-            ods_total=len(keys),
-            tons_dropped=sum(flow_tons[key] for key in below),
-            tons_total=sum(flow_tons[key] for key in keys),
+            ods_total=len(own),
+            tons_dropped=sum(below),
+            tons_total=sum(own),
         )
     kept: dict[tuple[ZoneCode, ZoneCode], dict[str, float]] = {}
-    for zone_pair, groups in by_pair.items():
-        left = {
-            g: t for g, t in groups.items() if (zone_pair, category[g]) not in small
-        }
-        if left:
-            kept[zone_pair] = left
+    for zone_pair, tt, t, cat in flows:
+        if t >= minimum.get(cat, 0.0):
+            kept.setdefault(zone_pair, {})[tt] = t
     return kept, report
 
 
@@ -500,7 +536,7 @@ def demand_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[
     region = region_lines(report.region) if report.region is not None else []
     return region + [
         (
-            f"FAF {settings.faf_year} rail + {settings.multimodal_rail_share:.0%} of "
+            f"FAF {FAF_YEAR} rail + {settings.multimodal_rail_share:.0%} of "
             f"multimodal, all trade types: {faf:,.0f} t/week, of which intra-zone {intra:,.0f}"
         ),
         (
@@ -508,6 +544,12 @@ def demand_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[
             f"to them dropped: {report.excluded_zone_tons:,.0f} t/week"
         ),
         f"excluded flows: {sum(report.excluded_tons.values()):,.0f} t/week",
+        *(
+            f"  {e.origin_zone}->{e.destination_zone} SCTG {', '.join(e.sctg)}: "
+            f"{report.excluded_tons.get(i, 0.0):,.0f} t/week"
+            + (f" ({e.reason})" if e.reason else "")
+            for i, e in enumerate(settings.excluded_flows)
+        ),
         (
             f"intra-zone under {settings.intra_zone_min_miles:g} mi (FAF5 distance), dropped: "
             f"{report.local_switching_rows:,} FAF rows, {switching:,.0f} t/week "
@@ -534,6 +576,10 @@ def demand_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[
             f"zone pairs with no yard pair (a zone has no yard group), dropped: "
             f"{report.no_yard_pair_tons:,.0f} t/week"
         ),
+        (
+            f"inter-zone, every yard pair under {settings.yard_pairs.min_route_km:g} km "
+            f"(local trains), dropped: {report.short_inter_tons:,.0f} t/week"
+        ),
     ]
 
 
@@ -549,12 +595,50 @@ def small_flow_lines(report: DemandReport) -> list[str]:
         for cat, d in drops.items()
     ]
     dropped = sum(d.tons_dropped for d in drops.values())
-    before = report.kept_tons + dropped  # all categories, before this step
+    # All categories, before this step (intra-zone local moves are dropped after it).
+    before = report.kept_tons + report.short_intra_tons + dropped
     lines.append(
         f"all categories: {sum(d.ods_below for d in drops.values()):,} zone-pair flows dropped, "
         f"{dropped:,.0f} of {before:,.0f} t/week ({dropped / before:.2%} of all tons)"
     )
     return lines
+
+
+def short_intra_lines(
+    report: DemandReport, settings: ServiceDesignSettings
+) -> list[str]:
+    """Intra-zone tons whose assigned yard pair is too short, for the run log."""
+    return [
+        (
+            f"intra-zone on a yard pair under {settings.yard_pairs.min_route_km:g} km "
+            f"(local trains), dropped: {report.short_intra_tons:,.0f} t/week"
+        )
+    ]
+
+
+TRADE_TYPE_NAMES = {"1": "domestic", "2": "import", "3": "export"}
+
+
+def kept_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[str]:
+    """Where the kept freight comes from (FAF mode and trade type), after every drop, for the run log."""
+    kept = report.kept_by_mode_trade
+    total = sum(kept.values())
+    if not total:
+        return []
+
+    def split(mode: str) -> str:
+        parts = ", ".join(
+            f"{name} {kept.get((mode, code), 0.0):,.0f}"
+            for code, name in TRADE_TYPE_NAMES.items()
+        )
+        tons = sum(t for (m, _), t in kept.items() if m == mode)
+        return f"{tons:,.0f} t/week ({tons / total:.1%}; {parts})"
+
+    return [
+        f"kept after every drop: {total:,.0f} t/week",
+        f"  rail: {split(RAIL_MODE)}",
+        f"  multimodal at {settings.multimodal_rail_share:.0%}: {split(MULTIMODAL_MODE)}",
+    ]
 
 
 def yard_targets(commodities: list[Commodity]) -> dict[YgKey, float]:

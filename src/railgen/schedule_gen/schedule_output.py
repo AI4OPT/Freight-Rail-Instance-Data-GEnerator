@@ -30,6 +30,8 @@ class DataOutputRow:
     IS_PU: IntBool
     IS_SO: IntBool
     IS_CG: IntBool
+    PU_TON: float  # tons picked up per run at BGN_YG
+    SO_TON: float  # tons set out per run at END_YG
 
     MON_REQ_LOC: int
     TUE_REQ_LOC: int
@@ -84,6 +86,8 @@ class DataOutputRow:
             IS_PU=1 if trip.bgn_yg_reason.pick_up else 0,
             IS_SO=1 if trip.end_yg_reason.set_out else 0,
             IS_CG=1 if is_crew_change else 0,
+            PU_TON=trip.bgn_yg_reason.pu_amount,
+            SO_TON=trip.end_yg_reason.so_amount,
             MON_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.MONDAY),
             TUE_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.TUESDAY),
             WED_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.WEDNESDAY),

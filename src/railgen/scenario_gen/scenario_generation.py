@@ -98,7 +98,7 @@ def process_train(
                 rng=rng,
                 train_dists=dists,
                 yg_dists=yg_dists,
-                min_dwell_time_mins=config.general_settings.minimum_dwell_time_minutes,
+                min_dwell_share=config.general_settings.minimum_dwell_share,
             )
             for row, sample in simulation.items():
                 output[row].get_day(day).append(sample)
@@ -121,7 +121,7 @@ def simulate_day(
     rng: Generator | None = None,
     train_dists: TrainDistributions,
     yg_dists: YardGroupDistributions,
-    min_dwell_time_mins: int,
+    min_dwell_share: float,
 ) -> dict[TrainRowID, Sample]:
     """Simulates a train's full trip on one day. Without `rng`, draws from an unseeded generator."""
 
@@ -170,13 +170,24 @@ def simulate_day(
         assert prev_trip.end_yg == cur_trip.bgn_yg, (
             "Previous trip's end yard group does not match current trip's begin yard group."
         )
-        dwell_delta_mins = add_samples(
-            train_dists.dwell_time,
-            yg_dists.yg_dwell_distributions.get(prev_trip.end_yg),
-            rng,
+        # Extra dwell from new problems at the stop: a delay, so never negative.
+        extra_dwell_mins = max(
+            0.0,
+            add_samples(
+                train_dists.dwell_time,
+                yg_dists.yg_dwell_distributions.get(prev_trip.end_yg),
+                rng,
+            ),
         )
-        actual_dwell_mins = max(
-            min_dwell_time_mins, dwell_time_planned + dwell_delta_mins
+        # The planned dwell is a minimum dwell (the work) plus a buffer. A late train
+        # uses up the buffer to recover; an early train is not held for its schedule.
+        arrival_delay = running_time_actual_minutes - prev_trip.arvl_minute
+        actual_dwell_mins = (
+            max(
+                min_dwell_share * dwell_time_planned,
+                dwell_time_planned - max(arrival_delay, 0.0),
+            )
+            + extra_dwell_mins
         )
 
         running_time_actual_minutes += actual_dwell_mins

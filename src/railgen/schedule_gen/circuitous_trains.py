@@ -1,8 +1,7 @@
-import random
 from collections import defaultdict
-from typing import Any
+from collections.abc import Hashable, Mapping
 
-from railgen.models import DayOfWeek, YgKey, ZoneCode
+from railgen.models import DayOfWeek, YgKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import RouteSegment, Train, TrainSymbol
 from railgen.schedule_gen.candidates import CandidateService
@@ -42,8 +41,8 @@ def net_balance(trains: list[Train]) -> dict[YgKey, int]:
     }
 
 
-def to_move_back(net: dict[Any, int]) -> int:
-    """Locomotives that would have to be moved to balance every yard group (or zone)."""
+def to_reposition(net: dict[YgKey, int]) -> int:
+    """Locomotives to reposition (move without a train that needs them) to balance every yard group."""
     return sum(v for v in net.values() if v > 0)
 
 
@@ -52,36 +51,28 @@ def terminals(trains: list[Train]) -> set[YgKey]:
     return {t.route[0].bgn_yg for t in trains} | {t.route[-1].end_yg for t in trains}
 
 
-def balance_lines(
-    trains: list[Train], zone_of: dict[YgKey, ZoneCode | None]
-) -> list[str]:
-    """Summary of the locomotive balance, for the run log and the report."""
+def balance_lines(trains: list[Train], ends: set[YgKey]) -> list[str]:
+    """Summary of the locomotive balance, for the run log and the report.
+
+    `ends` are the yard groups where trains start or end, taken before any circuitous train
+    is added, so that the lines before and after count the same yard groups.
+    """
     arrivals, departures = yard_traffic(trains)
     net = net_balance(trains)
-    ends = terminals(trains)
     share = {y: abs(net[y]) / (arrivals.get(y, 0) + departures.get(y, 0)) for y in ends}
     near = ", ".join(
         f"within {s:.0%} of their own traffic {sum(v <= s for v in share.values())}"
         for s in NEAR_BALANCE_SHARES
     )
-    zone_net: dict[ZoneCode, int] = defaultdict(int)
-    for y, v in net.items():
-        zone = zone_of.get(y)
-        if zone is not None:
-            zone_net[zone] += v
     return [
         (
             f"locomotive movements on legs: {sum(arrivals.values()):,} a week; "
-            f"to move back to balance every yard group: {to_move_back(net):,}"
+            f"to reposition to balance every yard group: {to_reposition(net):,}"
         ),
         (
             f"yard groups where trains start or end: {len(ends)}; balanced "
             f"{sum(net[y] == 0 for y in ends)}, {near}, one-way "
             f"{sum(v >= 1.0 for v in share.values())}"
-        ),
-        (
-            f"zones (their yard groups added): balanced {sum(v == 0 for v in zone_net.values())} "
-            f"of {len(zone_net)}; to move back between zones: {to_move_back(zone_net):,}"
         ),
     ]
 
@@ -96,15 +87,15 @@ def leg_balance(legs: list[RouteSegment]) -> dict[YgKey, int]:
     return dict(net)
 
 
-def pick_helpful(
+def pick_helpful[G: Hashable](
     net: dict[YgKey, int],
     candidates: dict[TrainSymbol, dict[YgKey, int]],
-    category_of: dict[TrainSymbol, str],
-    budget: dict[str, int],
+    group_of: Mapping[TrainSymbol, G],
+    budget: Mapping[G, int],
 ) -> list[TrainSymbol]:
     """Candidates chosen one at a time, each the one that most reduces the locomotives to
-    move back (`net` updated as they are chosen), within each category's budget. Stops
-    when no candidate left would reduce them."""
+    reposition (`net` updated as they are chosen), within the budget of each candidate's group
+    (e.g. its category). Stops when no candidate left would reduce them."""
 
     def gain(delta: dict[YgKey, int]) -> int:
         return sum(
@@ -116,7 +107,7 @@ def pick_helpful(
     chosen: list[TrainSymbol] = []
     pool = dict(candidates)
     while pool:
-        open_pool = {s: d for s, d in pool.items() if left.get(category_of[s], 0) > 0}
+        open_pool = {s: d for s, d in pool.items() if left.get(group_of[s], 0) > 0}
         if not open_pool:
             break
         best = max(sorted(open_pool), key=lambda s: gain(open_pool[s]))
@@ -124,75 +115,65 @@ def pick_helpful(
             break
         for y, d in pool.pop(best).items():
             net[y] = net.get(y, 0) + d
-        left[category_of[best]] -= 1
+        left[group_of[best]] -= 1
         chosen.append(best)
     return chosen
 
 
-def add_return_trips(
+def add_circuitous_trains(
     trains: list[Train],
     service_of: dict[TrainSymbol, CandidateService],
     network: RailNetwork,
     settings: ServiceDesignSettings,
-    seed: int,
 ) -> tuple[list[Train], list[str]]:
-    """The trains with the return trips of `settings.return_trips`, and report lines.
+    """The trains with the circuitous trains of `settings.circuitous_trains`, and report lines.
 
-    Circuitous trains first (a random share of each category's short trains), then empty
-    returns (chosen where they reduce the imbalance most) among the trains left.
+    Each category has two budgets, `round(share x its trains)` for its short and for its long
+    trains. Returns are then chosen one at a time over all eligible trains, each the one that
+    most reduces the locomotives to reposition, while its category and length still have budget.
     """
-    levers = settings.return_trips
-    rng = random.Random(seed)
-    extended: dict[TrainSymbol, Train] = {}
-    lines: list[str] = []
+    levers = settings.circuitous_trains
+    max_km = levers.short_max_miles * KM_PER_MILE
+    share_of = {"short": levers.short_empty_returns, "long": levers.long_empty_returns}
 
-    max_km = levers.circuitous_max_miles * KM_PER_MILE
-    for category, share in sorted(levers.circuitous_share.items()):
-        short = sorted(
-            (t for t in trains if t.category == category),
-            key=lambda t: t.symbol,
-        )
-        short = [t for t in short if service_of[t.symbol].total_km <= max_km]
-        picked = rng.sample(short, round(share * len(short)))
-        added = 0
-        for train in sorted(picked, key=lambda t: t.symbol):
-            longer = return_trip(train, service_of[train.symbol], network, settings)
-            if longer is not None:
-                extended[train.symbol] = longer
-                added += 1
-        lines.append(
-            f"circuitous trains, category {category}: {added} of {len(short)} trains of at "
-            f"most {levers.circuitous_max_miles:g} mi come back ({share:.0%} asked)"
-        )
+    def length(train: Train) -> str:
+        return "short" if service_of[train.symbol].total_km <= max_km else "long"
 
-    current = [extended.get(t.symbol, t) for t in trains]
+    trains_in: dict[tuple[str, str], int] = defaultdict(int)
+    for train in trains:
+        trains_in[(train.category, length(train))] += 1
+    budget = {
+        (category, kind): round(share * trains_in[(category, kind)])
+        for kind, shares in share_of.items()
+        for category, share in shares.items()
+    }
+
     candidates: dict[TrainSymbol, Train] = {}
-    for train in current:
-        if (
-            train.symbol in extended
-            or levers.empty_return_share.get(train.category, 0) <= 0
-        ):
+    group_of: dict[TrainSymbol, tuple[str, str]] = {}
+    for train in trains:
+        group = (train.category, length(train))
+        if budget.get(group, 0) <= 0:
             continue
         longer = return_trip(train, service_of[train.symbol], network, settings)
         if longer is not None:
             candidates[train.symbol] = longer
-    budget = {
-        c: int(share * sum(t.category == c for t in trains))
-        for c, share in levers.empty_return_share.items()
-    }
-    outbound_legs = {t.symbol: len(t.route) for t in current}
+            group_of[train.symbol] = group
+    outbound_legs = {t.symbol: len(t.route) for t in trains}
     chosen = pick_helpful(
-        net_balance(current),
+        net_balance(trains),
         {s: leg_balance(t.route[outbound_legs[s] :]) for s, t in candidates.items()},
-        {s: t.category for s, t in candidates.items()},
+        group_of,
         budget,
     )
-    for symbol in chosen:
-        extended[symbol] = candidates[symbol]
-    for category in sorted(levers.empty_return_share):
-        n = sum(candidates[s].category == category for s in chosen)
+
+    lines = []
+    for category, kind in sorted(budget):
+        n = sum(group_of[s] == (category, kind) for s in chosen)
+        fit = sum(g == (category, kind) for g in group_of.values())
         lines.append(
-            f"empty returns, category {category}: {n} trains come back with their empty "
-            f"cars (at most {budget[category]} allowed; {sum(t.category == category for t in candidates.values())} could fit in the week)"
+            f"{kind} empty returns, category {category}: {n} trains come back with their "
+            f"empty cars (at most {budget[(category, kind)]} of its {trains_in[(category, kind)]} "
+            f"{kind} trains; {fit} could fit in the week)"
         )
-    return [extended.get(t.symbol, t) for t in trains], lines
+    returned = {s: candidates[s] for s in chosen}
+    return [returned.get(t.symbol, t) for t in trains], lines

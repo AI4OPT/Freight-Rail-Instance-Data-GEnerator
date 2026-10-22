@@ -18,8 +18,8 @@ output
 
 # Gurobi solutions and logs, one folder per run
 gurobi_solutions
-gurobi_service_design.log	
-service_design_solutions
+gurobi_service_design.log
+
 
 # Generated Rail Network Files
 rail_network
@@ -27,7 +27,12 @@ rail_network
 # Downloaded Input Data Files
 input_data
 
+# Cluster job files
+*.sbatch
+
 # Environment variables
 .env
-# Config file & schema - use the CLI to generate
-schema/
+
+
+# Local source of pipeline_flowchart.png
+pipeline_flowchart.svg

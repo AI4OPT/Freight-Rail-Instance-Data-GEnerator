@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from railgen.constants import (
-    ALL_DISTANCES_FILE,
+    ALL_DISTANCES_GLOB,
     GRAPH_FILE,
     RAIL_NETWORK_DIR,
     YARD_GROUPS_DICT_FILE,
@@ -26,7 +26,8 @@ def build_network():
     ):
         graph_path.unlink()
         # Computed from the graph and only regenerated when missing
-        (RAIL_NETWORK_DIR / ALL_DISTANCES_FILE).unlink(missing_ok=True)
+        for cache in RAIL_NETWORK_DIR.glob(ALL_DISTANCES_GLOB):
+            cache.unlink()
     generate_or_load_network()
 
 

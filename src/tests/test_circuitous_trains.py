@@ -1,43 +1,57 @@
-"""Return trips and the locomotive balance (no solver, no graph files)."""
+"""Circuitous trains and the locomotive balance (no solver, no graph files)."""
 
 import random
 from types import SimpleNamespace
 
 import networkx as nx
 import pytest
+from pydantic import ValidationError
 
 from railgen.models import DayOfWeek, YgKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import TrainSymbol
 from railgen.schedule_gen.candidates import CandidateService
-from railgen.schedule_gen.model import Solution
-from railgen.schedule_gen.return_trips import (
+from railgen.schedule_gen.circuitous_trains import (
+    add_circuitous_trains,
     leg_balance,
     net_balance,
     pick_helpful,
 )
-from railgen.schedule_gen.schedule_config import Config, ServiceDesignSettings
+from railgen.schedule_gen.model import Solution
+from railgen.schedule_gen.schedule_config import (
+    CircuitousTrains,
+    Config,
+    ServiceDesignSettings,
+)
 from railgen.schedule_gen.solution_to_trains import return_trip, to_trains
 
 A, B, C, D = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
 
 
-def _coal_train(speed_km_h: float):
-    """One coal train A -> D (three 60 km hops on level track), 10,000 t, one run a week."""
+def _coal_train(
+    speed_km_h: float, hops_km: tuple[float, float, float] = (60.0, 60.0, 60.0)
+):
+    """One coal train A -> D (three hops on level track, 60 km each by default), 10,000 t,
+    one run a week."""
     network = object.__new__(RailNetwork)
-    network.cfg = Config()
+    network.cfg = Config.model_validate(
+        {
+            "train_settings": {
+                "speed_km_h_by_category": dict.fromkeys("AMBI", speed_km_h)
+            }
+        }
+    )
     network.train_speed_km_h = speed_km_h
     network.ygs_graph = nx.Graph()
-    for u, v in [(A, B), (B, C), (C, D)]:
-        network.ygs_graph.add_edge(u, v, weight=60.0)
+    for (u, v), km in zip([(A, B), (B, C), (C, D)], hops_km, strict=True):
+        network.ygs_graph.add_edge(u, v, weight=km)
     network.ygs_dict = {y: SimpleNamespace(elevation=0.0) for y in (A, B, C, D)}  # ty: ignore[invalid-assignment]
     service = CandidateService(
         id="S0",
         train_type="coal",
         path=(A, B, C, D),
         stop_positions=(0, 3),
-        leg_km=(180.0,),
-        leg_hours=(180.0 / speed_km_h,),
+        leg_km=(sum(hops_km),),
         leg_capacity_tons=(45_000.0,),
     )
     solution = Solution(
@@ -70,6 +84,12 @@ def test_return_trip_brings_the_empty_cars_and_locomotives_back():
     # 10,000 t of coal in cars carrying 100 t -> 100 empty cars of 29 t.
     assert back.tonnage_by_day.get_day(day) == pytest.approx(2_900.0)
     assert back.req_counts_by_day == out.req_counts_by_day  # same locomotives come back
+    assert out.bgn_yg_reason.pu_amount == pytest.approx(
+        10_000.0
+    )  # PU_TON of the first leg
+    assert back.end_yg_reason.so_amount == pytest.approx(
+        2_900.0
+    )  # the empty cars, set out at A
     assert not back.bgn_yg_reason.pick_up and back.end_yg_reason.set_out
     # Leaves after the set-out dwell (30 min); one crew for 4.5 + 0.5 + 4.5 h.
     start = _minutes(1, out.dep_time)
@@ -85,6 +105,17 @@ def test_return_trip_changes_crew_at_the_turn_when_the_shift_is_used_up():
     assert longer is not None
     out, *back = longer.route
     assert out.end_yg_reason.crew_change and back[0].bgn_yg_reason.crew_change
+
+
+def test_return_trip_crew_change_just_past_the_turn_moves_back_to_the_turn():
+    # 10 h out at 18 km/h; C is 200 m past the turn at D, and C -> B (6.7 h) is beyond the
+    # crew's hours, so the change would fall at C; it merges into the set-out at D.
+    train, service, network, settings = _coal_train(18.0, (60.0, 120.0, 0.2))
+    longer = return_trip(train, service, network, settings)
+    assert longer is not None
+    out, *back = longer.route
+    assert out.end_yg_reason.crew_change and back[0].bgn_yg_reason.crew_change
+    assert not any(leg.end_yg_reason.crew_change for leg in back)
 
 
 def test_return_trip_that_does_not_fit_in_a_week_is_not_made():
@@ -117,3 +148,42 @@ def test_returns_are_picked_where_they_help_most_and_never_when_they_hurt():
     # After s3 the two yards are balanced: s1 would undo that, so nothing more is added.
     assert pick_helpful(net, candidates, category, {"B": 3}) == [s3]
     assert pick_helpful(net, candidates, category, {"M": 3}) == []
+
+
+def _with_returns(settings: ServiceDesignSettings, **shares) -> ServiceDesignSettings:
+    return settings.model_copy(
+        update={"circuitous_trains": CircuitousTrains.model_validate(shares)}
+    )
+
+
+def test_short_train_comes_back_only_under_the_short_share():
+    train, service, network, settings = _coal_train(40.0)  # 180 km: short (225 mi)
+    service_of = {train.symbol: service}
+    short = _with_returns(settings, short_empty_returns={"B": 1.0})
+    (back,), lines = add_circuitous_trains([train], service_of, network, short)
+    assert len(back.route) > len(train.route)
+    assert lines == [
+        (
+            "short empty returns, category B: 1 trains come back with their empty cars "
+            "(at most 1 of its 1 short trains; 1 could fit in the week)"
+        )
+    ]
+    long = _with_returns(settings, long_empty_returns={"B": 1.0})
+    (same,), lines = add_circuitous_trains([train], service_of, network, long)
+    assert same is train
+    assert lines == [
+        (
+            "long empty returns, category B: 0 trains come back with their empty cars "
+            "(at most 0 of its 0 long trains; 0 could fit in the week)"
+        )
+    ]
+
+
+def test_circuitous_train_shares_accept_only_configured_categories():
+    with pytest.raises(ValidationError, match="Manifest"):
+        _ = ServiceDesignSettings.model_validate(
+            {"circuitous_trains": {"short_empty_returns": {"Manifest": 0.1}}}
+        )
+    assert ServiceDesignSettings.model_validate(
+        {"circuitous_trains": {"long_empty_returns": {"M": 0.1}}}
+    ).circuitous_trains.long_empty_returns == {"M": 0.1}
