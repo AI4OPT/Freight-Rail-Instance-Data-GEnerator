@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 
-from railgen.constants import ALL_DISTANCES_FILE
 from railgen.models import YgKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen import build_distance_matrix
@@ -46,8 +45,8 @@ def _rows(network: RailNetwork, yards: set[YgKey]) -> dict[tuple[str, str], floa
 
 def test_distance_cache_only_adds_missing_pairs(tmp_path, monkeypatch):
     monkeypatch.setattr(build_distance_matrix, "GRAPH_DIR", tmp_path)
-    cache_path = tmp_path / ALL_DISTANCES_FILE
     network = _climbing_line(REFERENCE_SPEED_KM_H)
+    cache_path = tmp_path / build_distance_matrix.distance_cache_file(network)
 
     assert set(_rows(network, {A, C})) == {(A, C), (C, A)}
     first = json.loads(cache_path.read_text())

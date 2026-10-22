@@ -1,0 +1,25 @@
+general_settings:
+  seed: 1333308203
+  scenario_count: 50
+  minimum_dwell_share: 0.75
+distributions_pool: {}
+default_distributions:
+  initial_departure:
+    distr_type: asymmetric_laplace
+    location: 0.0
+    scale: 60.0
+    skew: 0.5
+  trip_time_percent_diff:
+    distr_type: asymmetric_laplace
+    location: 0.0
+    scale: 5.0
+    skew: 0.7
+  dwell_time:
+    distr_type: log_normal
+    log_mean: 2.708
+    log_stdev: 1.0
+    location: 0.0
+train_category_distributions_overrides: {}
+yard_group_dwell_distributions: {}
+leg_trip_time_percent_diff_distributions: {}
+region_distributions: []

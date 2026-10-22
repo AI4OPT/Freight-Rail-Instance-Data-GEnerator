@@ -3,15 +3,17 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from typer.testing import CliRunner
 
-from cli.main import app
 from railgen.models import Coord, Location, TrainCategory, YardGroup, YgKey
 from railgen.scenario_gen.distribution_groupings import (
     TrainDistributions,
     YardGroupDistributions,
 )
-from railgen.scenario_gen.distributions import AsymmetricLaplace, NormalDist
+from railgen.scenario_gen.distributions import (
+    AsymmetricLaplace,
+    NormalDist,
+    WeibullDist,
+)
 from railgen.scenario_gen.scenario_config import (
     SCENARIO_CONFIG_FILE_PATH,
     ScenarioGenerationConfig,
@@ -39,8 +41,7 @@ train_category_distributions_overrides:
 
 
 def test_repo_scenario_config_file_is_valid():
-    found, _ = load_scenario_config(REPO_ROOT / SCENARIO_CONFIG_FILE_PATH)
-    assert found
+    assert load_scenario_config(REPO_ROOT / SCENARIO_CONFIG_FILE_PATH)
 
 
 def test_default_scenario_config_resolves_for_every_category():
@@ -48,16 +49,16 @@ def test_default_scenario_config_resolves_for_every_category():
     assert cfg == ScenarioGenerationConfig()
     for category in TrainCategory:
         assert cfg.train_distributions_for(category) == TrainDistributions(
-            initial_departure=NormalDist(distr_type="normal", mean=0, stdev=5),
-            trip_time_percent_diff=NormalDist(distr_type="normal", mean=0, stdev=5),
-            dwell_time=NormalDist(distr_type="normal", mean=0, stdev=5),
+            initial_departure=WeibullDist(distr_type="weibull", shape=1, scale=60),
+            trip_time_percent_diff=WeibullDist(distr_type="weibull", shape=1, scale=5),
+            dwell_time=WeibullDist(distr_type="weibull", shape=1, scale=15),
         )
 
 
 def test_overrides_layer_over_defaults_per_entry():
     cfg = load_scenario_yaml(SCENARIO_OVERRIDES)
     jittery = NormalDist(distr_type="normal", mean=0, stdev=45)
-    default_dwell = NormalDist(distr_type="normal", mean=0, stdev=5)
+    default_dwell = WeibullDist(distr_type="weibull", shape=1, scale=15)
 
     assert cfg.train_distributions_for(TrainCategory.A).initial_departure == jittery
     assert cfg.train_distributions_for(TrainCategory.A).dwell_time == default_dwell
@@ -152,14 +153,7 @@ def test_scenario_config_round_trips(tmp_path: Path):
     cfg = load_scenario_yaml(SCENARIO_OVERRIDES)
     path = tmp_path / "scenario_config.yaml"
     _ = path.write_text(cfg.to_yaml())
-    assert load_scenario_config(path) == (True, cfg)
-
-
-def test_config_default_writes_scenario_config(tmp_path: Path):
-    path = tmp_path / "scenario.yaml"
-    res = CliRunner().invoke(app, ["config", "default", "scenario", "-o", str(path)])
-    assert res.exit_code == 0
-    assert load_scenario_config(path) == (True, ScenarioGenerationConfig())
+    assert load_scenario_config(path) == cfg
 
 
 def load_scenario_yaml(text: str) -> ScenarioGenerationConfig:

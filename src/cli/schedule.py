@@ -9,9 +9,10 @@ from pydantic import ValidationError
 from rich import print
 from rich.progress import track
 
-from railgen.constants import TRAIN_SCHEDULE_FILE_NAME
+from railgen.constants import TRAIN_SCHEDULE_FILE_NAME, ZONE_YARD_GROUPS_FILE
 from railgen.models import TrainCategory, YgKey
 from railgen.rail_network import RailNetwork
+from railgen.rail_network_gen.graph_generation import write_zone_yard_groups
 from railgen.schedule_gen.attributes import TrainSymbol
 from railgen.schedule_gen.build_distance_matrix import (
     DistanceOutputRow,
@@ -81,7 +82,7 @@ def generate_schedule(
         )
         raise typer.Exit(1)
     try:
-        _, config = load_config(config_file)
+        config = load_config(config_file)
         print(f"[green]Loaded config from[/green] [blue]{config_file}[/blue]")
     except (FileNotFoundError, ValidationError) as e:
         print(f"[red]Invalid configuration file:[/red] {e}")
@@ -106,6 +107,14 @@ def generate_schedule(
     if seed is None:
         seed = secrets.randbits(32)
     print(f"[green]Train seed:[/green] {seed}")
+    # Saved with the run's config, so that file alone reproduces the run.
+    config = config.model_copy(
+        update={
+            "general_settings": config.general_settings.model_copy(
+                update={"train_seed": seed}
+            )
+        }
+    )
     stats = ScheduleGenerationStats(generation_rng_seed=seed)
 
     # Get the yard groups graph and yard groups dict
@@ -228,6 +237,14 @@ def generate_schedule(
         print(
             f"[green]Wrote distances for[/green] {len(output_ygs)} [green]yard groups to[/green] [blue]{DISTANCES_PATH}[/blue]"
         )
+
+    zone_yards_path = output_dir / ZONE_YARD_GROUPS_FILE
+    write_zone_yard_groups(
+        network.ygs_dict, network.hub_yard_groups_by_city(), zone_yards_path
+    )
+    print(
+        f"[green]Wrote the yard groups of each FAF zone, with the hubs, to[/green] [blue]{zone_yards_path}[/blue]"
+    )
 
     generation_config_path = output_dir / "schedule-generation-config.yaml"
     try:

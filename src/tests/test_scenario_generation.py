@@ -23,7 +23,7 @@ ZEROS = Week(mon=0, tue=0, wed=0, thu=0, fri=0, sat=0, sun=0)
 WEEKDAYS = Week(mon=True, tue=True, wed=True, thu=True, fri=True, sat=False, sun=False)
 
 
-def _cfg(dep: float = 0, count: int = 1) -> ScenarioGenerationConfig:
+def _cfg(dep: float = 0, count: int = 1, dwell: float = 0) -> ScenarioGenerationConfig:
     """stdev 0 everywhere, so every sample is exactly its mean."""
     dist = lambda mean: {"distr_type": "normal", "mean": mean, "stdev": 0}
     return ScenarioGenerationConfig.model_validate(
@@ -32,7 +32,7 @@ def _cfg(dep: float = 0, count: int = 1) -> ScenarioGenerationConfig:
             "default_distributions": {
                 "initial_departure": dist(dep),
                 "trip_time_percent_diff": dist(0),
-                "dwell_time": dist(0),
+                "dwell_time": dist(dwell),
             },
         }
     )
@@ -63,22 +63,43 @@ def _train(*legs: tuple[str, int, int], days: Week[bool] = WEEKDAYS) -> Schedule
     )
 
 
-def test_simulate_day_propagates_delay_and_clamps_dwell():
-    # R1 -> R2 has 60 min planned dwell; R2 -> R3 only 5, below the 30 min minimum.
-    train = _train(("R1", 600, 900), ("R2", 960, 1200), ("R3", 1205, 1500))
-    cfg = _cfg(dep=10)
-    assert simulate_day(
+def _simulate(train: ScheduledTrain, cfg: ScenarioGenerationConfig):
+    return simulate_day(
         train,
         train_dists=cfg.train_distributions_for(TrainCategory.A),
         yg_dists=YardGroupDistributions(
             leg_distributions={}, yg_dwell_distributions={}
         ),
-        min_dwell_time_mins=30,
-    ) == {
-        "R1": Sample(dep_min_delta=10, arvl_min_delta=10),
-        "R2": Sample(dep_min_delta=10, arvl_min_delta=10),
-        "R3": Sample(dep_min_delta=35, arvl_min_delta=35),
-    }
+        min_dwell_share=0.75,
+    )
+
+
+def test_late_train_recovers_with_the_buffer_of_the_dwell():
+    # 60 min planned dwell at R2: 45 min minimum + 15 min buffer.
+    train = _train(("R1", 600, 900), ("R2", 960, 1200))
+    # 10 min late: the buffer absorbs all of it.
+    assert _simulate(train, _cfg(dep=10))["R2"] == Sample(
+        dep_min_delta=0, arvl_min_delta=0
+    )
+    # 40 min late: only the 15 min buffer is recovered.
+    assert _simulate(train, _cfg(dep=40))["R2"] == Sample(
+        dep_min_delta=25, arvl_min_delta=25
+    )
+
+
+def test_early_train_is_not_held_and_extra_dwell_is_never_negative():
+    train = _train(("R1", 600, 900), ("R2", 960, 1200))
+    # 10 min early: dwells the planned 60 min and stays early.
+    assert _simulate(train, _cfg(dep=-10))["R2"] == Sample(
+        dep_min_delta=-10, arvl_min_delta=-10
+    )
+    # A negative draw of the extra dwell counts as 0; a positive one adds delay.
+    assert _simulate(train, _cfg(dwell=-20))["R2"] == Sample(
+        dep_min_delta=0, arvl_min_delta=0
+    )
+    assert _simulate(train, _cfg(dwell=7))["R2"] == Sample(
+        dep_min_delta=7, arvl_min_delta=7
+    )
 
 
 def test_generate_scenario_only_fills_active_days():

@@ -81,7 +81,7 @@ def _kept(instance: str):
         Commodity(
             origin=o,
             destination=d,
-            group="manifest",
+            train_type="manifest",
             tons_per_week=100.0,
             zone_pair=(ZoneCode("481"), ZoneCode("391")),
         )
@@ -148,7 +148,7 @@ def test_part_routes_keep_their_share_of_km_and_cost():
             Commodity(
                 origin=TX,
                 destination=OH,
-                group="manifest",
+                train_type="manifest",
                 tons_per_week=100.0,
                 zone_pair=(ZoneCode("481"), ZoneCode("391")),
             )

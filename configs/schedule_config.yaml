@@ -1,9 +1,11 @@
+# yaml-language-server: $schema=../schema/schedule_config.schema.json
+
 general_settings:
   train_seed: null
   data_output_dir: output
   seg_freq_arc_cost_discount_alpha: 0.3
   lambda: 0.5
-  median_f: 72.0
+  median_f: 12.0
 
 network_settings:
   hub_locations:
@@ -47,37 +49,86 @@ network_settings:
       state: MD
     - city: Detroit
       state: MI
-  min_od_yg_spacing_km: 5.0 # minimum track distance between two yard groups representing the same FAF zone
-  min_od_yg_track_km: 2.0 # minimum track length of a yard group chosen by distance for a zone with no city match (waived if none qualifies)
-  # NET codes of the rail network lines the walk between yard groups does not use (applied when graph.gexf is generated):
-  # A abandoned, R abandoned and removed, X out of service, T trail on a former rail line, F rail ferry.
+    - city: St. Louis
+      state: MO
+    - city: Omaha
+      state: NE
+    - city: North Platte
+      state: NE
+    - city: Denver
+      state: CO
+    - city: El Paso
+      state: TX
+    - city: Spokane
+      state: WA
+    - city: Jacksonville
+      state: FL
+    - city: Cincinnati
+      state: OH
+    - city: Buffalo
+      state: NY
+    - city: Laredo
+      state: TX
+  hub_radius_km: 50.0
+  min_od_yg_spacing_km: 5.0
+  min_od_yg_track_km: 2.0
   excluded_track_net_codes:
-    - A
-    - R
-    - X
-    - T
-    - F
-  od_discount_factor: 0.7
+    - A # abandoned
+    - R # abandoned and removed
+    - X # out of service
+    - T # trail on a former rail line
+    - F # rail ferry
+  max_connection_km: 800.0
+
   per_grade_speed_reduction: 0.1
   max_speed_reduction: 0.5
 
 train_settings:
   speed_km_h: 40
+  speed_km_h_by_category:
+    A: 40.0
+    M: 36.0
+    B: 38.0
+    I: 50.0
 
-# Train generator (service network design).
-# Dwell minutes by event combination at an intermediate stop; crew usable hours = duty_hours - terminal_hours.
 service_design_settings:
-  faf_year: "2022"
-  multimodal_rail_share: 0.5 # share of FAF "multiple modes" tons counted as rail (the intermodal group)
-  multimodal_min_miles: 500.0 # count them only on zone pairs whose multiple-modes freight averages at least this many miles (FAF5); 0 = every zone pair
-  multimodal_max_miles: 2500.0 # and at most this many miles (coast to coast is not one train); 0 = no upper limit
-  region: # which part of the network the instance covers; `--region` overrides `instance`
-    instance: full # full | east | west (east/west: flows crossing the boundary are cut where their route reaches the other side; see regions.py)
-    west_states: [MN, IA, MO, AR, LA, WI, ND, SD, NE, KS, OK, TX, MT, WY, CO, NM, ID, UT, AZ, WA, OR, NV, CA, AK, HI]
+  multimodal_rail_share: 0.5
+  multimodal_min_miles: 500.0
+  multimodal_max_miles: 2500.0
+  region:
+    instance: full
+    west_states:
+      [
+        MN,
+        IA,
+        MO,
+        AR,
+        LA,
+        WI,
+        ND,
+        SD,
+        NE,
+        KS,
+        OK,
+        TX,
+        MT,
+        WY,
+        CO,
+        NM,
+        ID,
+        UT,
+        AZ,
+        WA,
+        OR,
+        NV,
+        CA,
+        AK,
+        HI,
+      ]
     gateway_zones: ["171", "181", "172", "292", "201", "291", "471", "223"] # Chicago, St. Louis, Kansas City, Memphis, New Orleans: in both regions
-    gateway_radius_km: 25.0 # yard groups this close to a gateway zone's yard groups are in both regions
-  excluded_zones: # FAF zones whose rows are dropped, as origin or as destination
-    - "020" # Alaska: its track is not connected to the rest of the network
+    gateway_radius_km: 25.0
+  excluded_zones:
+    - "020" # Alaska
   freight_groups:
     coal:
       - "15"
@@ -98,28 +149,7 @@ service_design_settings:
     automotive:
       - "36"
       - "37"
-  group_train_types: 
-    coal:
-      - coal
-      - manifest
-    grain:
-      - grain
-      - manifest
-    ores_minerals:
-      - ores_minerals
-      - manifest
-    aggregates:
-      - aggregates
-      - manifest
-    petroleum_energy:
-      - petroleum_energy
-      - manifest
-    automotive:
-      - automotive
-    manifest:
-      - manifest
-    intermodal:
-      - intermodal
+  shared_bulk: true
   train_type_category:
     coal: B
     grain: B
@@ -135,40 +165,37 @@ service_design_settings:
       sctg:
         - "11"
         - "12"
-      reason:
-        "Detroit intra-zone sand and gravel: 1.08M t/week, 28% of FAF's national rail aggregates,
-        about half of AAR's national total."
+      reason: "Detroit intra-zone sand and gravel: 1.08M t/week which is 28% of FAF's national rail aggregates, about half of AAR's national total."
   intra_zone_min_miles: 25.0
-  min_od_tons_per_week: # drop a zone pair's flow of a category below this many t/week (before the yard-pair split)
-    A: 3500.0
+  min_od_tons_per_week:
+    A: 3000.0
     M: 15000.0
     B: 20000.0
-    I: 8500.0
+    I: 8000.0
   yard_pairs:
-    assignment: one_per_category # one_per_category | split_by_tonnage
+    assignment: one_per_category
     tonnage_step: 11000.0 # split_by_tonnage only
-    distance_tolerance: 0.3
+    distance_tolerance: 0.4
     max_pairs: 3 # split_by_tonnage only
+    min_route_km: 40.0
   work_yards_per_state: 3
-  max_trailing_tons_per_run: 10000.0 # default, for a category not listed below
-  # Max weight of one train run on any leg, by train category: freight plus the cars that carry it (car_weight).
-  # The freight a run may carry is this / (1 + empty car / cargo per car), e.g. M: 20,000 / (1 + 33/90) = 14,634 t.
   max_trailing_tons_per_run_by_category:
     A: 6500.0
     M: 13000.0
     B: 17000.0
     I: 12000.0
   max_runs_per_week: 7
-  max_symbols_per_service: 2 # limit on runs per week = max_runs_per_week x max_symbols_per_service
+  max_symbols_per_service: 2
   costs:
-    train_start: 25.0 
-    per_train_mile: 0.1 
-    per_distinct_train: 7500.0 # weekly charge for each train that runs at all, whatever its runs
-    transfer_fixed: 20.0 # cost per change of train of a commodity at a yard
-    transfer_per_ton: 0.01 # plus this per ton/week of that commodity
+    train_start: 300.0
+    per_train_mile: 0.1
+    per_distinct_train: 7500.0
+    transfer_fixed: 100.0
+    transfer_per_ton: 0.05
   crew:
     duty_hours: 12.0
     terminal_hours: 0.0
+    merge_with_work_stop_minutes: 15.0
   dwell_minutes:
     crew_only: 20.0
     so: 30.0
@@ -177,41 +204,32 @@ service_design_settings:
     so_crew: 70.0
     pu_crew: 80.0
     pu_so_crew: 140.0
-  # Tons behind the locomotives on a leg (trailing tons) = tons of freight x (1 + empty car / cargo per car):
-  # the freight fills freight / cargo-per-car cars, and each car adds its empty weight.
-  # Used for the locomotive count, and as the tonnage of return trips; otherwise the tonnage columns of the schedule are tons of freight.
   car_weight:
-    empty_car_tons_by_category: # weight of one empty car, in tons (0 = freight only)
+    empty_car_tons_by_category:
       A: 50.0
       M: 33.0
       B: 29.0
       I: 30.0
-    cargo_tons_per_car_by_category: # freight in one loaded car, in tons
+    cargo_tons_per_car_by_category:
       A: 20.0
       M: 90.0
       B: 100.0
       I: 60.0
-  # Return trips, added after the trains are built to reduce the locomotive imbalance between yard groups:
-  # the train continues as the same symbol straight back to its origin, carrying its empty cars
-  # (shown as the leg's tonnage), with the locomotives of its heaviest leg.
-  return_trips:
-    circuitous_share: {} # per category, e.g. {M: 0.1, B: 0.1}: share of short trains that come back, chosen at random
-    circuitous_max_miles: 225.0 # one-way length up to which a train is short
-    empty_return_share: {} # per category, e.g. {B: 0.5}: at most this share come back, chosen where it helps balance most
-  # Locomotives on a leg = hp per ton x trailing tons / locomotive_hp, rounded up.
-  # hp per ton = the larger of the train category's value below and what the leg's ruling grade needs:
-  # (rolling_resistance_lb_per_ton + 20 x grade %) x min_speed_mph / (375 x transmission_efficiency).
+  circuitous_trains:
+    short_empty_returns: { A: 1, M: 1, B: 1, I: 1 } # share of returns per category (A, M, B, I), e.g. {M: 0.5, B: 0.5}
+    long_empty_returns: {}
+    short_max_miles: 225.0
   locomotive_power:
     locomotive_hp: 4400.0
-    hp_per_ton_by_category: # horsepower per trailing ton a train of each category runs with
+    hp_per_ton_by_category:
       A: 1.4
       M: 1.3
       B: 0.78
-      I: 1.5
+      I: 1.7
     rolling_resistance_lb_per_ton: 2.0
-    min_speed_mph: 10.0 # slowest speed accepted on the ruling grade
-    transmission_efficiency: 0.82 # share of locomotive horsepower that reaches the rails
-    min_grade_hop_km: 5.0 # a hop shorter than this has no grade
+    min_speed_mph: 10.0
+    transmission_efficiency: 0.82
+    min_grade_hop_km: 5.0
   solver:
     time_limit_s: 600.0
     mip_gap: 0.02

@@ -22,7 +22,7 @@ GEOCODE_API_URL = "https://api-bdc.net/data/reverse-geocode"
 GEOCODE_CONCURRENCY = 10  # max simultaneous geocoding requests
 BDC_KEY = os.environ.get("BDC_KEY", "")
 
-# Forward geocoding (Nominatim). Finds FAF zone cities that match no yard group so we can fall back to the nearest one.
+# Forward geocoding (Nominatim): hub cities and city/state centers of scenario regions.
 FORWARD_GEOCODE_API_URL = "https://nominatim.openstreetmap.org/search"
 FRIDGE_USER_AGENT = (
     "FRIDGE/1.0 (https://github.com/AI4OPT/Freight-Rail-Instance-Data-GEnerator)"
@@ -45,7 +45,8 @@ HUB_EXPORT_TIMEOUT_S = 900  # give up if the export never reaches "Completed"
 YARD_RECORDS_FILE = "yard_records.json"
 # Yard groups after the changes file is applied
 YARD_GROUPS_DICT_FILE = "ygs_dict.json"
-ALL_DISTANCES_FILE = "all_distances.json"
+# Distance caches, one per grade setting (`build_distance_matrix.distance_cache_file`)
+ALL_DISTANCES_GLOB = "all_distances*.json"
 GRAPH_FILE = "graph.gexf"
 # E.g. drop edge A-C if some B has A-B + B-C shorter than A-C, or longer by less than this fraction (likely the same track running through B).
 SAME_TRACK_TOLERANCE = 0.03
@@ -54,10 +55,10 @@ SAME_TRACK_TOLERANCE = 0.03
 # - `drop`: not a freight yard (passenger, tourist) or off the network. Only removed when `graph.gexf` is rebuilt; until then it just can't represent a FAF zone.
 # - `bar`: stays in the network but can't represent a FAF zone (probably passenger-only, unconfirmed).
 YARD_GROUP_CHANGES_FILE = "yg_changes.csv"
-# Geocoded cities of FAF zones with no yard group match, cached so we don't hit the geocoder every load.
-FAF_ZONE_COORDS_FILE = "faf_zone_coords.json"
-# LaTeX table of the yard groups picked for each FAF zone, written when they're assigned.
-ZONE_YARD_GROUPS_FILE = "zone_yard_groups.tex"
+# Geocoded hub cities (`network_settings.hub_locations`), cached so we don't hit the geocoder every load.
+HUB_COORDS_FILE = "hub_coords.json"
+# Output of every schedule run: the yard groups that represent each FAF zone, and which are hubs.
+ZONE_YARD_GROUPS_FILE = "zone_yard_groups.csv"
 ELEVATION_API_URL = "https://api.open-meteo.com/v1/elevation"  # API Docs: https://open-meteo.com/en/docs/elevation-api
 ELEVATION_API_BATCH_SIZE = 99  # API allows up to 100 coords per call, but we use 99 to avoid exceeding the rate limit
 ELEVATION_API_BATCHES_PER_MINUTE = 5  # limit is 600 coords/min; 5 x 99 stays under
@@ -67,10 +68,15 @@ ELEVATION_API_RETRY_WAIT_S = 61  # the rate limit is per minute
 # FAF6 freight data
 FAF6_ZIP_URL = "https://faf.ornl.gov/faf6/data/Download_Files/ZIP/FAF6.0.zip"
 FAF6_CSV_NAME = "FAF6.0.csv"
-FAF6_METADATA_NAME = "FAF6_Metadata.xlsx"
-FAF6_ZONES_CSV_NAME = "FAF6_metadata_zones_table_edited.csv"
+# FAF6 zone boundaries (2022 CFS geography shapefile): FAF6.shp, .shx and .dbf are read.
+FAF6_ZONES_ZIP_URL = "https://faf.ornl.gov/faf6/data/FAF6.zip"
+FAF6_ZONES_DIR_NAME = "FAF6"
+FAF6_ZONES_BASE_NAME = "FAF6"
+# A yard outside every zone but this close to one belongs to it: a yard's first track point can
+# sit just over a zone boundary (EL PASO-193 is 7 m outside El Paso, on the Mexican border).
+FAF_ZONE_TOLERANCE_KM = 1.0
+# Year of the FAF tons columns: FAF6 has 2022 only. FAF5 ton-miles of the same year give the distances.
+FAF_YEAR = "2022"
 # FAF5 data - has intra-zone distances which faf6 does not
 FAF5_ZIP_URL = "https://faf.ornl.gov/faf5/Data/Download_Files/FAF5.7.1_2018-2024.zip"
 FAF5_CSV_NAME = "FAF5.7.1_2018-2024.csv"
-# How much of the "Multimodal" DMS mode freight movement should be considered as Rail
-MULTIMODAL_INCLUDE_PROPORTION = 0.5

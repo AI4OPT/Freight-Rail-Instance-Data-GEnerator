@@ -2,6 +2,7 @@ from itertools import pairwise
 from typing import cast
 
 import networkx as nx
+from haversine import haversine
 from networkx.classes.graph import Graph
 
 from railgen.models import YardGroup, YgKey
@@ -14,7 +15,6 @@ from railgen.utils import MINUTES_PER_HOUR, kilometers_to_meters
 class RailNetwork:
     ygs_dict: dict[YgKey, YardGroup]
     ygs_graph: Graph
-    # How FAF zones were mapped onto yard groups, produced during graph generation.
     od_assignment: OdAssignmentStats
     cfg: Config
     train_speed_km_h: float
@@ -33,21 +33,36 @@ class RailNetwork:
         return list(self.ygs_dict.keys())
 
     def get_hub_yard_groups(self) -> set[YgKey]:
-        """Hub yard groups: for each of `hub_locations`, the largest yard group in that city."""
-        hub_names: set[YgKey] = set()
-        for hub_loc in self.cfg.network_settings.hub_locations:
-            matches = [
-                (key, yg)
-                for key, yg in self.ygs_dict.items()
-                if hub_loc.matches(yg.city, yg.state)
-            ]
-            if not matches:
+        """Hub yard groups of every hub city that has one (`hub_yard_groups_by_city`)."""
+        return {key for key in self.hub_yard_groups_by_city().values() if key}
+
+    def hub_yard_groups_by_city(self) -> dict[str, YgKey | None]:
+        """Hub yard group of each of `hub_locations`, by `hub_label`: the largest FAF zone yard group (by track length) in the city's state within `hub_radius_km` of the geocoded city. A city with none in range gets None."""
+        net = self.cfg.network_settings
+        coords = graph_generation.hub_city_coords(net.hub_locations)
+        zone_ygs = [(key, yg) for key, yg in self.ygs_dict.items() if yg.is_od_yg]
+        hubs: dict[str, YgKey | None] = {}
+        for hub_loc in net.hub_locations:
+            label = graph_generation.hub_label(hub_loc)
+            hubs[label] = None
+            coord = coords.get(label)
+            if coord is None:
+                print(f"Hub {label} could not be geocoded; it gets no hub.")
                 continue
-            if len(matches) == 1:
-                hub_names.add(matches[0][0])
-            else:
-                hub_names.add(max(matches, key=lambda x: x[1].shape_length_km)[0])
-        return hub_names
+            near = [
+                (key, yg)
+                for key, yg in zone_ygs
+                if (yg.state or "").upper() == hub_loc.state_code
+                and haversine((coord.lat, coord.lon), (yg.coord.lat, yg.coord.lon))
+                <= net.hub_radius_km
+            ]
+            if not near:
+                print(
+                    f"Hub {label}: no zone yard group of {hub_loc.state_code} within {net.hub_radius_km:g} km; it gets no hub."
+                )
+                continue
+            hubs[label] = max(near, key=lambda x: x[1].shape_length_km)[0]
+        return hubs
 
     def build_phase1_routing_graph(self) -> nx.DiGraph:
         """Phase 1 routing graph: travel time, with edges touching OD yard groups discounted to pull routes through them."""
@@ -90,15 +105,17 @@ class RailNetwork:
                 _ = graph.add_edge(src, dst, weight=travel_time * discount)
         return graph
 
-    def get_travel_time(self, path: list[YgKey]) -> float:
+    def get_travel_time(
+        self, path: list[YgKey], speed_km_h: float | None = None
+    ) -> float:
         """
-        Returns the minutes required to travel the given path from the first to the last YardGroup in the path.
+        Returns the minutes required to travel the given path at given speed.
         """
         total_time = 0
         for sub_origin, sub_dest in pairwise(path):
             distance_km = float(self.ygs_graph[sub_origin][sub_dest]["weight"])
             # If the trip is uphill, reduce speed based on grade
-            train_speed = self.train_speed_km_h
+            train_speed = speed_km_h or self.train_speed_km_h
             grade_percent = self.get_grade_percent(sub_origin, sub_dest)
             if grade_percent > 0:
                 speed_reduction = (
@@ -115,7 +132,7 @@ class RailNetwork:
 
     def get_grade_percent(self, yg1: YgKey, yg2: YgKey) -> float:
         """
-        Returns the ascending grade, in percent, of the hop from yg1 to yg2 (0 when the hop is level or descending).
+        Returns the ascending grade (%) of the hop from yg1 to yg2 (0 when the hop is level or descending).
         """
         distance_km = float(self.ygs_graph[yg1][yg2]["weight"])
         elevation_change = self.ygs_dict[yg2].elevation - self.ygs_dict[yg1].elevation
@@ -125,7 +142,7 @@ class RailNetwork:
 
     def get_ruling_grade(self, path: list[YgKey], min_hop_km: float) -> float:
         """
-        Returns the steepest ascending grade, in percent, over the hops of the given path. A hop shorter than min_hop_km has no grade.
+        Returns the steepest ascending grade (%) over the hops of the given path. A hop shorter than min_hop_km has no grade.
         """
         return max(
             (

@@ -18,12 +18,9 @@ from railgen.schedule_gen.model import (
 from railgen.schedule_gen.routes import Route
 from railgen.schedule_gen.schedule_config import ServiceDesignSettings
 
-BULK_CATEGORY = "B"
-SHARED_BULK_TYPE = "bulk"
-
 # Relative to where FRIDGE is run. Each run writes its solutions and Gurobi logs to its own `<timestamp>/` folder in here.
 SOLUTION_DIR = Path("gurobi_solutions")
-_FORMAT = 1
+_FORMAT = 2  # version of the saved solution file; commodities have `train_type`
 
 
 @dataclass(kw_only=True)
@@ -40,27 +37,17 @@ def categories(
     commodities: list[Commodity], settings: ServiceDesignSettings
 ) -> list[str]:
     """Output categories that have freight."""
-    return sorted({settings.train_type_category[c.group] for c in commodities})
+    return sorted({settings.category_of(c.train_type) for c in commodities})
 
 
 def category_settings(
-    settings: ServiceDesignSettings,
-    category: str,
-    name: str,
-    *,
-    shared_bulk: bool = True,
+    settings: ServiceDesignSettings, name: str
 ) -> ServiceDesignSettings:
-    group_train_types = {g: [g] for g in settings.group_train_types}
-    train_type_category = dict(settings.train_type_category)
-    if category == BULK_CATEGORY and shared_bulk:
-        for g in group_train_types:
-            if train_type_category[g] == BULK_CATEGORY:
-                group_train_types[g] = [SHARED_BULK_TYPE]
-        train_type_category[SHARED_BULK_TYPE] = BULK_CATEGORY
+    """The settings of one category's model: its own Gurobi log file, unless logging is off."""
+    if settings.solver.log_file is None:
+        return settings
     return settings.model_copy(
         update={
-            "group_train_types": group_train_types,
-            "train_type_category": train_type_category,
             "solver": settings.solver.model_copy(
                 update={"log_file": f"gurobi_{name}.log"}
             ),
@@ -76,14 +63,11 @@ def build_category_model(
     settings: ServiceDesignSettings,
     category: str,
     *,
-    shared_bulk: bool = True,
     name: str | None = None,
 ) -> CategoryModel:
     name = name or category
-    cat_settings = category_settings(settings, category, name, shared_bulk=shared_bulk)
-    own = [
-        c for c in commodities if cat_settings.train_type_category[c.group] == category
-    ]
+    cat_settings = category_settings(settings, name)
+    own = [c for c in commodities if cat_settings.category_of(c.train_type) == category]
     candidates = generate_candidates(network, own, routes, allowed, cat_settings)
     return CategoryModel(
         name=name,
@@ -91,7 +75,7 @@ def build_category_model(
         settings=cat_settings,
         commodities=own,
         candidates=candidates,
-        index=build_od_index(own, routes, candidates, cat_settings),
+        index=build_od_index(own, routes, candidates),
     )
 
 
@@ -124,7 +108,7 @@ def instance_key(index: OdModelIndex, settings: ServiceDesignSettings) -> str:
             for s in index.services.values()
         ],
         "commodities": [
-            [c.origin, c.destination, c.group, round(c.tons_per_week, 6)]
+            [c.origin, c.destination, c.train_type, round(c.tons_per_week, 6)]
             for c in index.commodities
         ],
         "riders": [[sid, i, ks] for (sid, i), ks in sorted(index.riders.items())],
@@ -184,7 +168,6 @@ def read_solution(path: Path) -> SavedSolution:
             path=tuple(YgKey(y) for y in d["path"]),
             stop_positions=tuple(d["stop_positions"]),
             leg_km=tuple(d["leg_km"]),
-            leg_hours=tuple(d["leg_hours"]),
             leg_capacity_tons=tuple(d["leg_capacity_tons"]),
         )
         for d in content["services"]
@@ -193,7 +176,7 @@ def read_solution(path: Path) -> SavedSolution:
         Commodity(
             origin=YgKey(d["origin"]),
             destination=YgKey(d["destination"]),
-            group=d["group"],
+            train_type=d["train_type"],
             tons_per_week=d["tons_per_week"],
             zone_pair=(ZoneCode(d["zone_pair"][0]), ZoneCode(d["zone_pair"][1])),
         )

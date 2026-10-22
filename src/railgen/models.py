@@ -1,4 +1,3 @@
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -20,7 +19,7 @@ class TrainCategory(StrEnum):
 
     A = "A"  # Automotive
     M = "M"  # Manifest
-    B = "B"  # Bulk commodity service (coal, grain, ores & minerals, aggregates, petroleum & energy)
+    B = "B"  # Bulk (coal, grain, ores & minerals, aggregates, petroleum & energy)
     I = "I"  # Intermodal
 
 
@@ -38,20 +37,6 @@ class ZoneCode(str):
             cls,
             core_schema.str_schema(),
         )
-
-
-@dataclass(frozen=True, kw_only=True)
-class FafODTonnage:
-    """Weekly FAF rail tons per (origin, destination) zone pair, in total and per sctg2 commodity code."""
-
-    od_tonnage: dict[tuple[ZoneCode, ZoneCode], float]
-    od_commodity_tonnage: dict[tuple[ZoneCode, ZoneCode], dict[str, float]]
-
-    def get_proportions(self) -> dict[tuple[ZoneCode, ZoneCode], float]:
-        total = sum(self.od_tonnage.values())
-        if total == 0:
-            return {}
-        return {pair: t / total for pair, t in self.od_tonnage.items()}
 
 
 class DayOfWeek(Enum):
@@ -113,18 +98,10 @@ class Coord(BaseModel):
         return hash((self.lat, self.lon))
 
 
-def _clean_city(name: str) -> str:
-    name = name.lower().strip()
-    name = re.sub(r"\bst\.\s*", "saint ", name).strip()
-    return name
-
-
 class Location(BaseModel):
-    """Normalized city and state code."""
+    """City and state code."""
 
-    raw_city: str = Field(
-        alias="city", description="City name. Compared case-insensitively."
-    )
+    raw_city: str = Field(alias="city", description="City name.")
     state_code: str = Field(
         alias="state", description="Two-letter US state code normalized to uppercase."
     )
@@ -137,42 +114,6 @@ class Location(BaseModel):
     @classmethod
     def _upper_state(cls, state: str) -> str:
         return state.upper()
-
-    @property
-    def normalized_city(self) -> str:
-        """Lowercased, `St.`-expanded city name. All matching happens on this form."""
-        return _clean_city(self.raw_city)
-
-    # Equality is a fuzzy match on purpose
-    @override
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Location) and self.matches(
-            other.raw_city, other.state_code
-        )
-
-    @override
-    def __hash__(self) -> int:
-        return hash((self.normalized_city, self.state_code))
-
-    def matches(self, other_city: str, other_state_code: str) -> bool:
-        # Check state code matches
-        if self.state_code != other_state_code.upper():
-            return False
-
-        # Check city matches
-        this_city = self.normalized_city
-        clean_other = _clean_city(other_city)
-        if this_city == other_city:
-            return True
-        if this_city in clean_other or clean_other in this_city:
-            return True
-        for part in re.split(r"[-/]", this_city):
-            if _clean_city(part.strip()) == clean_other:
-                return True
-        for part in re.split(r"[-/]", clean_other):
-            if _clean_city(part.strip()) == this_city:
-                return True
-        return False
 
 
 class YgKey(str):

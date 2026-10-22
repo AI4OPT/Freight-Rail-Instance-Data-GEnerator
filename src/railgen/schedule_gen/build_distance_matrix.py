@@ -6,7 +6,6 @@ import networkx as nx
 from pydantic import TypeAdapter
 from rich.progress import track
 
-from railgen.constants import ALL_DISTANCES_FILE
 from railgen.constants import RAIL_NETWORK_DIR as GRAPH_DIR
 from railgen.models import YgKey
 from railgen.rail_network import RailNetwork
@@ -28,9 +27,7 @@ class DistanceOutputRow:
         return [field.name for field in fields(DistanceOutputRow)]
 
 
-# The minutes in the JSON cache file are always those at this train speed. Travel time is
-# proportional to 1 / train speed (the slowdown on a grade is a share of the speed), so the
-# minutes at any other speed follow from them exactly.
+# Cache minutes are stored at this speed and rescaled to the run's (travel time ∝ 1 / speed, grades included).
 REFERENCE_SPEED_KM_H = 100.0
 
 
@@ -84,6 +81,15 @@ def add_missing_yg_distances(
     return added
 
 
+def distance_cache_file(network: RailNetwork) -> str:
+    """Name of the distance cache. It names the grade settings, since its minutes depend on them."""
+    net = network.cfg.network_settings
+    return (
+        f"all_distances_grade{net.per_grade_speed_reduction:g}"
+        f"_max{net.max_speed_reduction:g}.json"
+    )
+
+
 def generate_output_yg_distances(
     network: RailNetwork,
     output_ygs: set[YgKey],
@@ -94,10 +100,11 @@ def generate_output_yg_distances(
     of this run that it lacks are computed and added to it. Its minutes include the
     slowdown on grades and are stored at `REFERENCE_SPEED_KM_H`; the rows returned here
     are at the train speed of this run, so the cache stays valid when the speed changes.
-    Delete it after the network or the grade settings (`per_grade_speed_reduction`,
-    `max_speed_reduction`) change.
+    Each pair of grade settings has its own cache file (`distance_cache_file`). Delete the
+    caches after the network changes.
     """
-    all_distances_path: Path = GRAPH_DIR / ALL_DISTANCES_FILE
+    cache_file = distance_cache_file(network)
+    all_distances_path: Path = GRAPH_DIR / cache_file
     distances: DistanceCache = (
         distance_cache_adapter.validate_json(all_distances_path.read_bytes())
         if all_distances_path.exists()
@@ -110,7 +117,7 @@ def generate_output_yg_distances(
     added = add_missing_yg_distances(network, yard_groups, distances)
     pair_count = len(yard_groups) * (len(yard_groups) - 1)
     print(
-        f"{ALL_DISTANCES_FILE}: {added:,} of the {pair_count:,} output yard group pairs "
+        f"{cache_file}: {added:,} of the {pair_count:,} output yard group pairs "
         f"were missing and have been calculated."
     )
     if added:

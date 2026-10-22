@@ -18,7 +18,6 @@ class CandidateService:
         int, ...
     ]  # indices into `path`: origin, potential stops, destination
     leg_km: tuple[float, ...]  # one per leg between consecutive stops
-    leg_hours: tuple[float, ...]
     leg_capacity_tons: tuple[float, ...]
 
     @property
@@ -68,20 +67,17 @@ def build_candidate(
     last = len(path) - 1
     positions = [i for i, node in enumerate(path) if i in (0, last) or node in allowed]
     leg_km: list[float] = []
-    leg_hours: list[float] = []
     for a, b in pairwise(positions):
         seg = path[a : b + 1]
         leg_km.append(
             sum(float(network.ygs_graph[u][v]["weight"]) for u, v in pairwise(seg))
         )
-        leg_hours.append(network.get_travel_time(seg) / 60)
     return CandidateService(
         id=cid,
         train_type=train_type,
         path=tuple(path),
         stop_positions=tuple(positions),
         leg_km=tuple(leg_km),
-        leg_hours=tuple(leg_hours),
         leg_capacity_tons=tuple(capacity for _ in leg_km),
     )
 
@@ -95,19 +91,16 @@ def generate_candidates(
 ) -> list[CandidateService]:
     """Candidates for every kept yard pair (see `demand.build_commodities`)."""
     pair_tons: dict[tuple[YgKey, YgKey], float] = defaultdict(float)
-    pair_groups: dict[tuple[YgKey, YgKey], set[str]] = defaultdict(set)
+    pair_types: dict[tuple[YgKey, YgKey], set[str]] = defaultdict(set)
     for c in commodities:
         pair_tons[(c.origin, c.destination)] += c.tons_per_week
-        pair_groups[(c.origin, c.destination)].add(c.group)
+        pair_types[(c.origin, c.destination)].add(c.train_type)
     pairs = sorted(pair_tons, key=lambda p: (-pair_tons[p], p))
 
     out: list[CandidateService] = []
     for pair in pairs:
         route = routes[pair]
-        types = sorted(
-            {t for g in pair_groups[pair] for t in settings.group_train_types[g]}
-        )
-        for t in types:
+        for t in sorted(pair_types[pair]):
             out.append(
                 build_candidate(
                     network,
