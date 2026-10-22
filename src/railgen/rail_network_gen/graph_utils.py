@@ -1,12 +1,10 @@
 import asyncio
 import heapq
-import itertools
 import time
 from collections.abc import Awaitable, Callable
 from typing import cast
 
 import httpx
-from networkx.classes.graph import Graph
 from rich.progress import track
 
 from railgen.constants import (
@@ -26,7 +24,6 @@ from railgen.models import (
     ElevationResponse,
     LineStringGeometry,
     MultiLineStringGeometry,
-    YardGroup,
     YgKey,
 )
 from railgen.utils import get_progress_desc_with_padding
@@ -222,38 +219,35 @@ def get_yg_coord(geom: LineStringGeometry | MultiLineStringGeometry) -> Coord:
 
 
 def custom_dijkstra(
-    trav_graph: Graph,
-    all_yg_geom_coords: dict[Coord, YgKey],
-    yg: tuple[str, YardGroup],
+    trav_graph: dict[int, dict[int, tuple[float, ...]]],
+    yg_at: list[YgKey | None],
+    src_yg_name: YgKey,
+    src: int,
 ) -> dict[YgKey, float]:
     """
     Dijkstra outward from a YardGroup over the track graph. When a path hits another YardGroup's geometry, that YardGroup is a neighbor and the path stops there.
 
     ## Args:
-    - trav_graph -- track graph built from the geojson
-    - all_yg_geom_coords -- every YardGroup geometry coordinate -> its YardGroup name
-    - yg -- (name, YardGroup) to start from
+    - trav_graph -- track node -> neighbor track node -> lengths (km) of the track segments between them
+    - yg_at -- YardGroup name whose geometry includes each track node, or None
+    - src_yg_name -- name of the YardGroup to start from
+    - src -- its track node
 
     ## Returns:
     - Neighbor YardGroup names -> distance (km)
     """
-    src_yg_name = yg[0]
-    src_coord = yg[1].coord
-    dist_from_src_yg = {src_coord: 0.0}
-    # Coords aren't orderable, so heap ties break on push order.
-    pushed = itertools.count()
-    pq = [(0.0, next(pushed), src_coord)]
+    dist_from_src_yg = {src: 0.0}
+    pq = [(0.0, src)]
     found_connected_ygs: dict[YgKey, float] = {}
     while pq:
-        dist_to_curr, _, curr_coord = heapq.heappop(pq)
-        if dist_to_curr != dist_from_src_yg.get(curr_coord):
+        dist_to_curr, curr = heapq.heappop(pq)
+        if dist_to_curr != dist_from_src_yg[curr]:
             continue
-        if curr_coord not in trav_graph:
-            continue
-        for next_coord, edge_data in trav_graph[curr_coord].items():
-            edge_dist = float(edge_data.get("weight", 0.0))
-            new_dist = dist_to_curr + edge_dist
-            yg_at_next = all_yg_geom_coords.get(next_coord)
+        for next_node, edge_kms in trav_graph[curr].items():
+            new_dist = dist_to_curr
+            for km in edge_kms:
+                new_dist += km
+            yg_at_next = yg_at[next_node]
             if yg_at_next is not None and yg_at_next != src_yg_name:
                 if (
                     yg_at_next not in found_connected_ygs
@@ -261,7 +255,7 @@ def custom_dijkstra(
                 ):
                     found_connected_ygs[yg_at_next] = new_dist
                 continue
-            if new_dist < dist_from_src_yg.get(next_coord, float("inf")):
-                dist_from_src_yg[next_coord] = new_dist
-                heapq.heappush(pq, (new_dist, next(pushed), next_coord))
+            if new_dist < dist_from_src_yg.get(next_node, float("inf")):
+                dist_from_src_yg[next_node] = new_dist
+                heapq.heappush(pq, (new_dist, next_node))
     return found_connected_ygs
