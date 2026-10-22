@@ -5,7 +5,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_ = load_dotenv()
+load_dotenv()
+
 
 # Where FRIDGE output is saved to
 OUTPUT_DIR_NAME = "output"

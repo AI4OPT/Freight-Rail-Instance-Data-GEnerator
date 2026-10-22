@@ -8,6 +8,7 @@ from rich.table import Table
 
 from railgen.constants import (
     ALL_DISTANCES_GLOB,
+    BDC_KEY,
     GRAPH_FILE,
     RAIL_NETWORK_DIR,
     YARD_GROUPS_DICT_FILE,
@@ -28,6 +29,13 @@ def build_network():
         # Computed from the graph and only regenerated when missing
         for cache in RAIL_NETWORK_DIR.glob(ALL_DISTANCES_GLOB):
             cache.unlink()
+
+    if not BDC_KEY:
+        print("[red]BDC_KEY environment variable is not set.[/red]")
+        print(
+            "Please obtain a free API key from https://www.bigdatacloud.com and set it in your evironment.",
+        )
+        raise typer.Exit(1)
     generate_or_load_network()
 
 
