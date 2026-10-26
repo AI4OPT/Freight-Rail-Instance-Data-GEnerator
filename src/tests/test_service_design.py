@@ -270,6 +270,14 @@ def _climbing_line():
     network.ygs_graph.add_edge(a, b, weight=20.0)  # +100 m over 20 km: 0.5%
     network.ygs_graph.add_edge(b, c, weight=10.0)  # +150 m over 10 km: 1.5%
     network.ygs_graph.add_edge(c, d, weight=1.0)  # +50 m over 1 km: 5%, a short hop
+    network.ruling_grades = {
+        (a, b): 0.5,
+        (b, a): 0.0,
+        (b, c): 1.5,
+        (c, b): 0.4,
+        (c, d): 1.2,
+        (d, c): 0.0,
+    }
     network.ygs_dict = {  # ty: ignore[invalid-assignment]
         y: SimpleNamespace(elevation=z)
         for y, z in [(a, 0.0), (b, 100.0), (c, 250.0), (d, 300.0)]
@@ -277,20 +285,21 @@ def _climbing_line():
     return network, [a, b, c, d]
 
 
-def test_ruling_grade_is_steepest_ascending_hop_of_min_length():
+def test_ruling_grade_is_steepest_edge_grade_in_direction_of_travel():
     network, path = _climbing_line()
-    assert network.get_ruling_grade(path, min_hop_km=5.0) == pytest.approx(1.5)
-    assert network.get_ruling_grade(path, min_hop_km=0.0) == pytest.approx(5.0)
-    assert network.get_ruling_grade(path[::-1], min_hop_km=5.0) == 0.0
+    assert network.get_ruling_grade(path) == 1.5
+    assert network.get_ruling_grade(path[::-1]) == 0.4
 
 
 def test_travel_time_is_slower_uphill():
-    network, (a, b, _c, _d) = _climbing_line()
+    network, (a, b, c, d) = _climbing_line()
     # Downhill: 20 km at 40 km/h. Uphill at 0.5%: speed cut by 0.5 x 10% = 5%.
     assert network.get_travel_time([b, a]) == pytest.approx(30.0)
     assert network.get_travel_time([a, b]) == pytest.approx(20 / 38 * 60)
     # At a category's own speed: 20 km at 20 km/h downhill.
     assert network.get_travel_time([b, a], 20.0) == pytest.approx(60.0)
+    # A hop shorter than grade_window_km has no grade.
+    assert network.get_travel_time([c, d]) == pytest.approx(1.5)
 
 
 def test_extraction_gives_category_and_locomotives_per_leg():
@@ -374,7 +383,7 @@ class _StubNetwork:
     def get_travel_time(self, path, speed_km_h=None):
         return 300.0 * (len(path) - 1)
 
-    def get_ruling_grade(self, path, min_hop_km):
+    def get_ruling_grade(self, path):
         return 0.0
 
 

@@ -1,3 +1,6 @@
+import json
+import os
+from collections.abc import Iterable
 from itertools import pairwise
 from typing import cast
 
@@ -5,6 +8,12 @@ import networkx as nx
 from haversine import haversine
 from networkx.classes.graph import Graph
 
+from railgen.constants import (
+    EDGE_GRADES_FILE,
+    MAX_TRACK_GRADE_PERCENT,
+    RAIL_NETWORK_DIR,
+    TRACK_OFF_GROUND_M,
+)
 from railgen.models import YardGroup, YgKey
 from railgen.rail_network_gen import graph_generation
 from railgen.schedule_gen.schedule_config import Config
@@ -18,6 +27,10 @@ class RailNetwork:
     od_assignment: OdAssignmentStats
     cfg: Config
     train_speed_km_h: float
+    # Steepest ascending grade in percent along the track of each directional hop
+    ruling_grades: dict[tuple[YgKey, YgKey], float]
+    # Saved with the grades, which are not used when these differ.
+    grade_settings: dict[str, float]
 
     def __init__(self, cfg: Config) -> None:
         self.ygs_dict, self.ygs_graph, self.od_assignment = (
@@ -25,6 +38,18 @@ class RailNetwork:
         )
         self.cfg = cfg
         self.train_speed_km_h = cfg.train_settings.speed_km_h
+        self.grade_settings = {
+            "window_km": cfg.service_design_settings.locomotive_power.grade_window_km,
+            "max_track_grade_percent": MAX_TRACK_GRADE_PERCENT,
+            "track_off_ground_m": TRACK_OFF_GROUND_M,
+        }
+        path = RAIL_NETWORK_DIR / EDGE_GRADES_FILE
+        saved = json.loads(path.read_text()) if path.exists() else {}
+        self.ruling_grades = (
+            {(YgKey(a), YgKey(b)): grade for a, b, grade in saved["grades"]}
+            if saved.get("settings") == self.grade_settings
+            else {}
+        )
 
     def get_all_yard_group_names(self) -> list[YgKey]:
         """
@@ -132,23 +157,46 @@ class RailNetwork:
 
     def get_grade_percent(self, yg1: YgKey, yg2: YgKey) -> float:
         """
-        Returns the ascending grade (%) of the hop from yg1 to yg2 (0 when the hop is level or descending).
+        Returns the ascending grade (%) of the hop from yg1 to yg2 (0 when the hop is level, descending, or shorter than `grade_window_km`).
         """
         distance_km = float(self.ygs_graph[yg1][yg2]["weight"])
         elevation_change = self.ygs_dict[yg2].elevation - self.ygs_dict[yg1].elevation
-        if elevation_change <= 0 or distance_km <= 0:
+        window_km = self.cfg.service_design_settings.locomotive_power.grade_window_km
+        if elevation_change <= 0 or distance_km < window_km:
             return 0.0
         return (elevation_change / kilometers_to_meters(distance_km)) * 100
 
-    def get_ruling_grade(self, path: list[YgKey], min_hop_km: float) -> float:
+    def load_ruling_grades(self, hops: Iterable[tuple[YgKey, YgKey]]) -> None:
         """
-        Returns the steepest ascending grade (%) over the hops of the given path. A hop shorter than min_hop_km has no grade.
+        Grades the hops that are not in `ruling_grades` yet along their track (`graph_generation.grade_hops`) and saves all grades to `EDGE_GRADES_FILE`. Reading the track takes a while, so the hops of a schedule are graded together.
         """
-        return max(
-            (
-                self.get_grade_percent(sub_origin, sub_dest)
-                for sub_origin, sub_dest in pairwise(path)
-                if float(self.ygs_graph[sub_origin][sub_dest]["weight"]) >= min_hop_km
-            ),
-            default=0.0,
+        missing = {
+            (min(hop), max(hop)) for hop in hops if hop not in self.ruling_grades
+        }
+        if not missing:
+            return
+        self.ruling_grades |= graph_generation.grade_hops(
+            self.ygs_dict,
+            self.ygs_graph,
+            missing,
+            self.grade_settings["window_km"],
+            graph_generation.load_yard_group_changes()[0],
+            self.cfg.network_settings.excluded_track_net_codes,
         )
+        path = RAIL_NETWORK_DIR / EDGE_GRADES_FILE
+        tmp_path = path.with_suffix(f".{os.getpid()}.tmp")  # own file per run
+        _ = tmp_path.write_text(
+            json.dumps(
+                {
+                    "settings": self.grade_settings,
+                    "grades": [[a, b, g] for (a, b), g in self.ruling_grades.items()],
+                }
+            )
+        )
+        tmp_path.replace(path)
+
+    def get_ruling_grade(self, path: list[YgKey]) -> float:
+        """
+        Returns the steepest grade, in percent, of the hops of the given path in its direction of travel. Its hops must be graded first (`load_ruling_grades`).
+        """
+        return max((self.ruling_grades[hop] for hop in pairwise(path)), default=0.0)

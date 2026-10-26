@@ -84,9 +84,10 @@ def add_missing_yg_distances(
 def distance_cache_file(network: RailNetwork) -> str:
     """Name of the distance cache. It names the grade settings, since its minutes depend on them."""
     net = network.cfg.network_settings
+    window_km = network.cfg.service_design_settings.locomotive_power.grade_window_km
     return (
         f"all_distances_grade{net.per_grade_speed_reduction:g}"
-        f"_max{net.max_speed_reduction:g}.json"
+        f"_max{net.max_speed_reduction:g}_window{window_km:g}.json"
     )
 
 

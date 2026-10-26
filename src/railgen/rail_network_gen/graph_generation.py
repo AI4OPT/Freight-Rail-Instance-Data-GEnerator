@@ -1,9 +1,10 @@
-import asyncio
 import csv
 import json
 import time
+from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable
 from collections.abc import Set as AbstractSet
+from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
@@ -16,15 +17,18 @@ from pydantic import ValidationError
 from rich.progress import track
 
 from railgen.constants import (
+    EDGE_GRADES_FILE,
     FORWARD_GEOCODE_MIN_INTERVAL_S,
     GRAPH_FILE,
     HUB_COORDS_FILE,
     HUB_DOWNLOAD_URL,
     HUB_EXPORT_POLL_S,
     HUB_EXPORT_TIMEOUT_S,
+    MAX_TRACK_GRADE_PERCENT,
     NA_RAIL_NETWORK_FILE,
     NA_RAIL_NETWORK_ITEM_ID,
     SAME_TRACK_TOLERANCE,
+    TRACK_OFF_GROUND_M,
     YARD_GROUP_CHANGES_FILE,
     YARD_GROUPS_DICT_FILE,
     YARD_GROUPS_FILE,
@@ -54,15 +58,15 @@ from railgen.models import (
     ygs_dict_adapter,
 )
 from railgen.rail_network_gen.graph_utils import (
-    concurrent_elevation_fetch,
     concurrent_geocode,
     custom_dijkstra,
     forward_geocode,
     get_yg_coord,
+    sample_elevations,
 )
 from railgen.schedule_gen.schedule_config import Config, load_config
 from railgen.stats import OdAssignmentStats
-from railgen.utils import get_progress_desc_with_padding
+from railgen.utils import get_progress_desc_with_padding, kilometers_to_meters
 
 YG_CHANGES_PATH = Path(__file__).parent / YARD_GROUP_CHANGES_FILE
 
@@ -333,15 +337,23 @@ def _kept_name(name: YgKey, merges: dict[YgKey, YgKey]) -> YgKey:
     return name
 
 
-def traverse_graph(
+def _merged_name(
+    name: YgKey, ygs: Collection[YgKey], merges: dict[YgKey, YgKey]
+) -> YgKey:
+    """`_kept_name`, or `name` itself when that YardGroup is missing and the merge is skipped (`merge_yard_group_records`)."""
+    kept = _kept_name(name, merges)
+    return kept if kept in ygs else name
+
+
+def track_graph(
     ygs: dict[YgKey, YardGroup],
     raw_ygs: list[YardGroupFeature],
     raw_network: list[RailNetworkFeature],
     merges: dict[YgKey, YgKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
-) -> set[tuple[YgKey, YgKey, float]]:
+) -> tuple[dict[tuple[float, float], int], list[dict[int, float]], list[YgKey | None]]:
     """
-    Walk the rail network out from every YardGroup (`custom_dijkstra`) and collect YardGroup-to-YardGroup edges.
+    The track the walk of `traverse_graph` uses, and the YardGroup of every track node on a YardGroup's geometry.
 
     ## Args:
     - ygs -- YardGroups by name
@@ -351,7 +363,9 @@ def traverse_graph(
     - excluded_track_net_codes -- `NET` codes the walk skips (abandoned lines, ferries, ...)
 
     ## Returns:
-    - Set of (YardGroup 1, YardGroup 2, km), keeping the shortest distance per pair.
+    - Track node of each (lat, lon), numbered in order
+    - Neighbor track node -> km, for each track node
+    - YardGroup name whose geometry includes each track node, or None
     """
     # Track nodes are numbered: (lat, lon) -> node, and adj[node] is neighbor node -> km.
     nodes: dict[tuple[float, float], int] = {}
@@ -373,7 +387,7 @@ def traverse_graph(
     ):
         yg_id = str(yg_feat.properties.get("OBJECTID"))
         yg_name_str = str(yg_feat.properties.get("YARDNAME"))
-        yg_key = _kept_name(YgKey.new(yg_name_str, yg_id), merges or {})
+        yg_key = _merged_name(YgKey.new(yg_name_str, yg_id), ygs, merges or {})
         if yg_key not in ygs:
             continue
         geom = yg_feat.geometry
@@ -387,7 +401,25 @@ def traverse_graph(
                 node = nodes.get((cp[1], cp[0]))
                 if node is not None:
                     yg_at[node] = yg_key
+    return nodes, adj, yg_at
 
+
+def traverse_graph(
+    ygs: dict[YgKey, YardGroup],
+    raw_ygs: list[YardGroupFeature],
+    raw_network: list[RailNetworkFeature],
+    merges: dict[YgKey, YgKey] | None = None,
+    excluded_track_net_codes: Collection[str] = (),
+) -> set[tuple[YgKey, YgKey, float]]:
+    """
+    Walk the rail network out from every YardGroup (`custom_dijkstra`) and collect YardGroup-to-YardGroup edges. Arguments as for `track_graph`.
+
+    ## Returns:
+    - Set of (YardGroup 1, YardGroup 2, km), keeping the shortest distance per pair.
+    """
+    nodes, adj, yg_at = track_graph(
+        ygs, raw_ygs, raw_network, merges, excluded_track_net_codes
+    )
     srcs = {
         name: nodes[coord]
         for name, yg in ygs.items()
@@ -431,6 +463,109 @@ def traverse_graph(
         for (yg_name_1, yg_name_2), distance in best.items()
     }
     return norm_edges
+
+
+def grade_hops(
+    ygs: dict[YgKey, YardGroup],
+    ygs_graph: Graph,
+    hops: Collection[tuple[YgKey, YgKey]],
+    window_km: float,
+    merges: dict[YgKey, YgKey] | None = None,
+    excluded_track_net_codes: Collection[str] = (),
+) -> dict[tuple[YgKey, YgKey], float]:
+    """
+    Steepest ascending grade, in percent, along the track of each hop of the YardGroup graph. The grade at a track coordinate is its rise over the last `window_km` of track; a hop shorter than that has no grade. Elevations over tunnels and under bridges are interpolated first (`MAX_TRACK_GRADE_PERCENT`).
+
+    The track of a hop is the walk of `traverse_graph` between its YardGroups: the shorter of the walks from either one or a record merged into it, searched back from the other's geometry no farther than the length of the edge.
+
+    ## Args:
+    - ygs -- dictionary of YardGroup names to YardGroup objects
+    - ygs_graph -- YardGroup graph holding every hop as an edge
+    - hops -- pairs of YardGroups to grade, in either order
+    - window_km -- track length a grade is measured over
+    - merges, excluded_track_net_codes -- as for `track_graph`
+
+    ## Returns:
+    - Dictionary of (YardGroup 1, YardGroup 2) to the grade travelling from 1 to 2, for both orders of every hop.
+    """
+    raw_ygs, raw_network = load_geojson()
+    nodes, adj, yg_at = track_graph(
+        ygs, raw_ygs, raw_network, merges, excluded_track_net_codes
+    )
+    trav_graph = nx.Graph(
+        (u, v, {"weight": km}) for u, out in enumerate(adj) for v, km in out.items()
+    )
+    yg_track: dict[YgKey, list[int]] = defaultdict(list)
+    for node, yg_key in enumerate(yg_at):
+        if yg_key is not None:
+            yg_track[yg_key].append(node)
+    # A graph built before a merge has edges walked from the merged record (`merge_graph_nodes`).
+    starts: dict[YgKey, set[int]] = defaultdict(set)
+    for feat in raw_ygs:
+        name = YgKey.new(
+            str(feat.properties.get("YARDNAME")), str(feat.properties.get("OBJECTID"))
+        )
+        coord = get_yg_coord(feat.geometry)
+        if (node := nodes.get((coord.lat, coord.lon))) is not None:
+            starts[_merged_name(name, ygs, merges or {})].add(node)
+
+    paths: dict[tuple[YgKey, YgKey], list[int]] = {}
+    for a, b in track(hops, get_progress_desc_with_padding("Finding hop track...")):
+        found: list[tuple[float, list[int]]] = []
+        for src, dst in ((a, b), (b, a)):
+            for start in starts[src]:
+                if not yg_track[dst]:
+                    continue
+                try:
+                    dist, path = nx.multi_source_dijkstra(
+                        trav_graph,
+                        yg_track[dst],
+                        target=start,
+                        cutoff=float(ygs_graph[a][b]["weight"]) * 1.001,
+                        # Like the walk, do not pass through another YardGroup. The walk starts at `start` even when it is on another YardGroup's track too.
+                        weight=lambda _u, v, d, start=start, ends=(None, src, dst): (
+                            d["weight"] if v == start or yg_at[v] in ends else None
+                        ),
+                    )
+                except nx.NetworkXNoPath:
+                    continue
+                found.append((dist, path[::-1] if src == a else path))
+        if not found:
+            raise ValueError(f"No track found between {a} and {b}")
+        paths[(a, b)] = min(found, key=lambda f: f[0])[1]
+
+    coord_of = list(nodes)
+    path_nodes = list({node for path in paths.values() for node in path})
+    coords = [Coord(lat=coord_of[n][0], lon=coord_of[n][1]) for n in path_nodes]
+    elevations = dict(zip(path_nodes, sample_elevations(coords)))
+    rise_per_km = kilometers_to_meters(MAX_TRACK_GRADE_PERCENT / 100)
+    grades: dict[tuple[YgKey, YgKey], float] = {}
+    for (a, b), path in paths.items():
+        km = np.cumsum([0.0] + [adj[u][v] for u, v in pairwise(path)])
+        elev = np.array([elevations[node] for node in path])
+        # A point is on the ground when every earlier point on the ground reaches it within the max grade, give or take TRACK_OFF_GROUND_M: between max(e + s * x) - s * km and min(e - s * x) + s * km over those points.
+        on_ground: list[int] = []
+        floor, ceiling = -np.inf, np.inf
+        for i, (x, e) in enumerate(zip(km.tolist(), elev.tolist())):
+            if (
+                floor - rise_per_km * x - TRACK_OFF_GROUND_M
+                <= e
+                <= ceiling + rise_per_km * x + TRACK_OFF_GROUND_M
+            ):
+                on_ground.append(i)
+                floor = max(floor, e + rise_per_km * x)
+                ceiling = min(ceiling, e - rise_per_km * x)
+        elev = np.interp(km, km[on_ground], elev[on_ground])
+        start = np.searchsorted(km, km - window_km, side="right") - 1
+        end = start >= 0
+        grade = (
+            (elev[end] - elev[start[end]])
+            / kilometers_to_meters(km[end] - km[start[end]])
+            * 100
+        )
+        grades[(a, b)] = float(grade.max(initial=0.0))
+        grades[(b, a)] = float((-grade).max(initial=0.0))
+    return grades
 
 
 def _copy_yard_attributes(graph: Graph, ygs: dict[YgKey, YardGroup]) -> None:
@@ -486,6 +621,7 @@ def build_or_load_graph(
     edges = traverse_graph(ygs, raw_ygs, raw_network, merges, excluded_track_net_codes)
     for a, b, d in edges:
         _ = graph.add_edge(a, b, weight=d)
+    (GRAPH_DIR / EDGE_GRADES_FILE).unlink(missing_ok=True)
     nx.write_gexf(G=graph, path=GRAPH_DIR / GRAPH_FILE)
     return graph
 
@@ -736,7 +872,7 @@ def load_yard_records() -> dict[YgKey, YardGroup]:
         )
     raw_ygs = load_yards_geojson()
     yg_coords = [get_yg_coord(yg.geometry) for yg in raw_ygs]
-    elevations = asyncio.run(concurrent_elevation_fetch(yg_coords))
+    elevations = sample_elevations(yg_coords)
     city_states = concurrent_geocode(yg_coords)
     records: dict[YgKey, YardGroup] = {}
     for yg, elevation, (city, state) in track(

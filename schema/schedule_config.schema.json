@@ -311,11 +311,11 @@
           "title": "Transmission Efficiency",
           "type": "number"
         },
-        "min_grade_hop_km": {
-          "default": 5.0,
-          "description": "Hops shorter than this (km) have no grade: elevations of nearby yards differ without a real climb.",
-          "minimum": 0,
-          "title": "Min Grade Hop Km",
+        "grade_window_km": {
+          "default": 10.0,
+          "description": "Length (km) of windows over which to measure a track's ruling grade. If a track is shorter than this distance, it is given a grade of zero.",
+          "exclusiveMinimum": 0,
+          "title": "Grade Window Km",
           "type": "number"
         }
       },
@@ -551,7 +551,7 @@
         },
         "max_symbols_per_service": {
           "default": 3,
-          "description": "Most parallel symbols of one service (runs <= max_runs_per_week x this).",
+          "description": "Most parallel symbols of one service. Runs are at most max_runs_per_week x max_symbols_per_service, or more if its own freight needs more.",
           "title": "Max Symbols Per Service",
           "type": "integer"
         },

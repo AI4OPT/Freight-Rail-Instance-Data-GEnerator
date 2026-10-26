@@ -218,12 +218,6 @@ rail_network_adapter: TypeAdapter[list[RailNetworkFeature]] = TypeAdapter(
 )
 
 
-class ElevationResponse(BaseModel):
-    """Elevation API response: one elevation per input coordinate."""
-
-    elevation: list[float]
-
-
 class YardGroupFeature(BaseModel):
     """A yard record from the NTAD rail yards geojson."""
 

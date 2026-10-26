@@ -228,7 +228,7 @@ service_design_settings:
     rolling_resistance_lb_per_ton: 2.0
     min_speed_mph: 10.0
     transmission_efficiency: 0.82
-    min_grade_hop_km: 5.0
+    grade_window_km: 10.0
   circuitous_trains:
     short_empty_returns:
       A: 1.0
