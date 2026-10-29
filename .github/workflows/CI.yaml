@@ -28,6 +28,9 @@ jobs:
       - name: Run Linter
         run: uv run ruff check
 
+      - name: Validate CITATION.cff
+        run: uvx cffconvert --validate
+
       - name: Check for Schema drift
         run: |
           uv run fridge config-schema
