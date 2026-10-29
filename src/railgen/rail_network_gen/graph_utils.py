@@ -1,19 +1,23 @@
 import asyncio
 import heapq
-import time
+import math
+import os
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 
 import httpx
+import numpy as np
+import rasterio
+from rasterio.transform import rowcol
 from rich.progress import track
 
 from railgen.constants import (
     BDC_KEY,
-    ELEVATION_API_BATCH_SIZE,
-    ELEVATION_API_BATCHES_PER_MINUTE,
-    ELEVATION_API_MAX_ATTEMPTS,
-    ELEVATION_API_RETRY_WAIT_S,
-    ELEVATION_API_URL,
+    DEM_DIR,
+    DEM_DOWNLOAD_CONCURRENCY,
+    DEM_TILE_URL,
     FORWARD_GEOCODE_API_URL,
     FRIDGE_USER_AGENT,
     GEOCODE_API_URL,
@@ -21,42 +25,11 @@ from railgen.constants import (
 )
 from railgen.models import (
     Coord,
-    ElevationResponse,
     LineStringGeometry,
     MultiLineStringGeometry,
     YgKey,
 )
 from railgen.utils import get_progress_desc_with_padding
-
-
-async def _batched_fetch[T](
-    coords: list[Coord],
-    fetch_batch: Callable[[httpx.AsyncClient, list[Coord]], Awaitable[list[T]]],
-    batch_size: int,
-    batches_per_minute: int,
-    description: str,
-) -> list[T]:
-    """Batched API calls, sent in waves of `batches_per_minute` to stay under a per-minute rate limit."""
-    batches = [coords[i : i + batch_size] for i in range(0, len(coords), batch_size)]
-    all_results: list[list[T]] = []
-    prev_time_start: float | None = None
-    waves = list(range(0, len(batches), batches_per_minute))
-    async with httpx.AsyncClient() as client:
-        for wave_start in track(
-            waves, description=get_progress_desc_with_padding(description)
-        ):
-            now = time.monotonic()
-            if prev_time_start is not None:
-                wait = 61.0 - (now - prev_time_start)
-                if wait > 0:
-                    await asyncio.sleep(wait)
-            prev_time_start = time.monotonic()
-            wave_batches = batches[wave_start : wave_start + batches_per_minute]
-            wave_results = await asyncio.gather(
-                *[fetch_batch(client, batch) for batch in wave_batches]
-            )
-            all_results.extend(wave_results)
-    return [item for batch_result in all_results for item in batch_result]
 
 
 async def _semaphore_fetch[T](
@@ -87,47 +60,64 @@ async def _semaphore_fetch[T](
     return cast(list[T], results)
 
 
-async def _fetch_elevation_batch(
-    client: httpx.AsyncClient, coords: list[Coord]
-) -> list[float]:
-    if not coords:
-        return []
-    attempt = 1
-    while True:
-        try:
-            resp = await client.get(
-                ELEVATION_API_URL,
-                params={
-                    "latitude": ",".join(str(c.lat) for c in coords),
-                    "longitude": ",".join(str(c.lon) for c in coords),
-                },
-                timeout=120.0,
-            )
-            _ = resp.raise_for_status()
-            return ElevationResponse.model_validate_json(resp.text).elevation
-        except httpx.HTTPError as e:
-            if attempt == ELEVATION_API_MAX_ATTEMPTS:
-                raise
-            reason = (
-                e.response.status_code
-                if isinstance(e, httpx.HTTPStatusError)
-                else type(e).__name__
-            )
-            print(
-                f"Elevation request failed ({reason}), retrying in {ELEVATION_API_RETRY_WAIT_S}s"
-            )
-            await asyncio.sleep(ELEVATION_API_RETRY_WAIT_S)
-            attempt += 1
+def sample_elevations(coords: list[Coord]) -> list[float]:
+    """Elevation in metres of each coordinate, read from the Copernicus GLO-90 tiles in `DEM_DIR`. Missing tiles are downloaded, `DEM_DOWNLOAD_CONCURRENCY` at a time; a coordinate with no tile (open water) gets 0."""
+    by_tile: dict[str, list[int]] = defaultdict(list)
+    for i, coord in enumerate(coords):
+        lat, lon = math.floor(coord.lat), math.floor(coord.lon)
+        by_tile[
+            f"Copernicus_DSM_COG_30_{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00_{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00_DEM"
+        ].append(i)
+    DEM_DIR.mkdir(parents=True, exist_ok=True)
 
+    def download(name: str) -> bool:
+        resp = httpx.get(DEM_TILE_URL.format(name=name), timeout=300.0)
+        if resp.status_code == 404:
+            return False
+        partial = DEM_DIR / f"{name}.tif.{os.getpid()}.part"  # own file per run
+        _ = partial.write_bytes(resp.raise_for_status().content)
+        partial.replace(DEM_DIR / f"{name}.tif")
+        return True
 
-async def concurrent_elevation_fetch(coords: list[Coord]) -> list[float]:
-    return await _batched_fetch(
-        coords,
-        fetch_batch=_fetch_elevation_batch,
-        batch_size=ELEVATION_API_BATCH_SIZE,
-        batches_per_minute=ELEVATION_API_BATCHES_PER_MINUTE,
-        description="Fetching elevations...",
-    )
+    missing = [name for name in by_tile if not (DEM_DIR / f"{name}.tif").exists()]
+    with ThreadPoolExecutor(DEM_DOWNLOAD_CONCURRENCY) as pool:
+        found = list(
+            track(
+                pool.map(download, missing),
+                total=len(missing),
+                description=get_progress_desc_with_padding("Downloading DEM tiles..."),
+            )
+        )
+    not_found = [name for name, ok in zip(missing, found) if not ok]
+    if not_found:
+        print(
+            f"Warning: {len(not_found):,} DEM tile(s) not found at {DEM_TILE_URL}, so "
+            f"{sum(len(by_tile[name]) for name in not_found):,} coordinate(s) get 0 m as if "
+            f"on open water. If any are on land, check DEM_TILE_URL: {', '.join(not_found)}"
+        )
+    elevations = [0.0] * len(coords)
+    for name, idx in track(
+        by_tile.items(),
+        description=get_progress_desc_with_padding("Sampling elevations..."),
+    ):
+        path = DEM_DIR / f"{name}.tif"
+        if not path.exists():
+            continue
+        with rasterio.open(path) as src:
+            rows, cols = rowcol(
+                src.transform,
+                [coords[i].lon for i in idx],
+                [coords[i].lat for i in idx],
+            )
+            band = src.read(1)
+            # Tiles are offset half a pixel, so a point on the bottom or right edge lands one past the last pixel.
+            tile_elevations = band[
+                np.clip(rows, 0, band.shape[0] - 1),
+                np.clip(cols, 0, band.shape[1] - 1),
+            ]
+        for i, elevation in zip(idx, tile_elevations):
+            elevations[i] = float(elevation)
+    return elevations
 
 
 async def _fetch_one_geocode(

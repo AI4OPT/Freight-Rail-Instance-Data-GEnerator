@@ -354,10 +354,10 @@ class LocomotivePower(BaseModel):
         le=1,
         description="Share of a locomotive's horsepower that reaches the rails.",
     )
-    min_grade_hop_km: float = Field(
-        5.0,
-        ge=0,
-        description="Hops shorter than this (km) have no grade: elevations of nearby yards differ without a real climb.",
+    grade_window_km: float = Field(
+        10.0,
+        gt=0,
+        description="Length (km) of windows over which to measure a track's ruling grade. If a track is shorter than this distance, it is given a grade of zero.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -531,7 +531,7 @@ class ServiceDesignSettings(BaseModel):
     )
     max_symbols_per_service: int = Field(
         3,
-        description="Most parallel symbols of one service; its runs a week are at most max_runs_per_week x max_symbols_per_service, or more if its own freight needs more.",
+        description="Most parallel symbols of one service. Runs are at most max_runs_per_week x max_symbols_per_service, or more if its own freight needs more.",
     )
     costs: Costs = Field(default_factory=Costs)
     crew: CrewRule = Field(default_factory=CrewRule)

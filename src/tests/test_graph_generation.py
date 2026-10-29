@@ -1,6 +1,7 @@
 """Unit tests for the pure pieces of graph generation (no geojson, no FAF file)."""
 
 import networkx as nx
+import pytest
 
 from railgen.faf_data import LazyLoad
 from railgen.models import (
@@ -156,13 +157,8 @@ def _point(i: int) -> list[float]:
     return [0.01 * i, 0.0]  # [lon, lat]: points 1.1 km apart on the equator
 
 
-def _walk(
-    yards: dict[str, list[int]],
-    kept: list[str],
-    merges: dict[str, str],
-    excluded_track_net_codes: tuple[str, ...] = (),
-) -> dict[frozenset[str], float]:
-    """Edges of the walk over one straight track of 11 points; `yards` gives each record's points.
+def _records(yards: dict[str, list[int]], kept: list[str]):
+    """One straight track of 11 points; `yards` gives each record's points.
 
     The track is two lines: points 0 to 5 are main line (`NET` M) and points 5 to 10 are abandoned (`NET` A).
     """
@@ -202,6 +198,16 @@ def _walk(
         )
         for name in kept
     }
+    return ygs, raw_ygs, track_line
+
+
+def _walk(
+    yards: dict[str, list[int]],
+    kept: list[str],
+    merges: dict[str, str],
+    excluded_track_net_codes: tuple[str, ...] = (),
+) -> dict[frozenset[str], float]:
+    ygs, raw_ygs, track_line = _records(yards, kept)
     edges = traverse_graph(
         ygs,
         raw_ygs,
@@ -243,6 +249,65 @@ def test_walk_does_not_use_excluded_track():
         _RECORDS, kept=list(_RECORDS), merges={}, excluded_track_net_codes=("A",)
     )
     assert set(edges) == {frozenset(("A-1", "B-1")), frozenset(("B-1", "B2-1"))}
+
+
+def _grade_hops(monkeypatch, yards, hops, elevation):
+    ygs, raw_ygs, track_line = _records(yards, list(yards))
+    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_ygs, track_line))
+    monkeypatch.setattr(
+        graph_generation, "sample_elevations", lambda cs: [elevation(c) for c in cs]
+    )
+    pairs = [(YgKey(f"{a}-1"), YgKey(f"{b}-1")) for a, b in hops]
+    km = {(a, b): 1.12 * abs(yards[a][0] - yards[b][0]) for a, b in hops}
+    graph = nx.Graph([(*pair, {"weight": km[hop]}) for pair, hop in zip(pairs, hops)])
+    return graph_generation.grade_hops(ygs, graph, pairs, 2.0)
+
+
+def test_hop_grade_follows_its_track_in_each_direction(monkeypatch):
+    # Flat to point 3, then 22 m per point, 1.11 km apart: 1.98%
+    grades = _grade_hops(
+        monkeypatch,
+        {"A": [0], "B": [3], "C": [5]},
+        [("A", "B"), ("C", "B")],
+        lambda c: 2200.0 * max(c.lon - 0.03, 0.0),
+    )
+    assert grades[("A-1", "B-1")] == grades[("B-1", "A-1")] == 0.0
+    assert grades[("B-1", "C-1")] == pytest.approx(1.98, abs=0.01)
+    assert grades[("C-1", "B-1")] == 0.0
+
+
+def test_hop_grade_ignores_a_ridge_steeper_than_track(monkeypatch):
+    grades = _grade_hops(
+        monkeypatch,
+        {"A": [0], "C": [10]},
+        [("A", "C")],
+        lambda c: 300.0 if c.lon == 0.05 else 0.0,
+    )
+    assert grades == {("A-1", "C-1"): 0.0, ("C-1", "A-1"): 0.0}
+
+
+def test_hop_grade_finds_track_after_merges_added_to_a_built_graph(monkeypatch):
+    # The K-N edge is the walk from X, and M's merge into a missing Q is skipped.
+    ygs, raw_ygs, track_line = _records(
+        {"N": [0, 1, 2], "X": [4], "K": [6], "M": [8]}, ["N", "X", "K", "M"]
+    )
+    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_ygs, track_line))
+    monkeypatch.setattr(
+        graph_generation, "sample_elevations", lambda cs: [0.0] * len(cs)
+    )
+    edges = traverse_graph(ygs, raw_ygs, track_line)
+    merges = {YgKey("X-1"): YgKey("K-1"), YgKey("M-1"): YgKey("Q-1")}
+    graph = merge_graph_nodes(
+        nx.Graph([(a, b, {"weight": km}) for a, b, km in edges]), merges
+    )
+    del ygs[YgKey("X-1")]
+    grades = graph_generation.grade_hops(ygs, graph, list(graph.edges), 2.0, merges)
+    assert set(grades) == {
+        ("K-1", "N-1"),
+        ("N-1", "K-1"),
+        ("K-1", "M-1"),
+        ("M-1", "K-1"),
+    }
 
 
 def test_walk_handles_two_points_at_the_same_distance():

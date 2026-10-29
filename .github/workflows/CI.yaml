@@ -28,5 +28,13 @@ jobs:
       - name: Run Linter
         run: uv run ruff check
 
+      - name: Check for Schema drift
+        run: |
+          uv run fridge config-schema
+          if [[ -n $(git diff) ]]; then
+            echo 'Config JSON Schemas not up to date. Run fridge config-schema and re-commit.' >&2
+            exit 1
+          fi
+
       - name: Run Tests
         run: uv run pytest

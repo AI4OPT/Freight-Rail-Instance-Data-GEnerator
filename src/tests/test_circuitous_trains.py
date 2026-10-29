@@ -45,6 +45,7 @@ def _coal_train(
     network.ygs_graph = nx.Graph()
     for (u, v), km in zip([(A, B), (B, C), (C, D)], hops_km, strict=True):
         network.ygs_graph.add_edge(u, v, weight=km)
+    network.ruling_grades = dict.fromkeys(network.ygs_graph.to_directed().edges, 0.0)
     network.ygs_dict = {y: SimpleNamespace(elevation=0.0) for y in (A, B, C, D)}  # ty: ignore[invalid-assignment]
     service = CandidateService(
         id="S0",

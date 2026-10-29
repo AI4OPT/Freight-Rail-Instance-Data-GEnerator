@@ -51,19 +51,20 @@ The seed sets only each train's running days and start time, from one generator 
 
 `RailNetwork(config)` calls `generate_or_load_network`, which returns the yard groups (`ygs_dict`, keyed `YARDNAME-OBJECTID`) and an undirected graph of them (`ygs_graph`, edges in km). Cached in `rail_network/`:
 
-| File                                 | Contents                                              |
-| ------------------------------------ | ----------------------------------------------------- |
-| `yard_records.json`                  | Every NTAD yard record with elevation and city (1a)   |
-| `graph.gexf`                         | The yard group graph before pruning (1c)              |
-| `ygs_dict.json`                      | The yard groups and the FAF zone each represents (1e) |
-| `hub_coords.json`                    | Geocoded hub cities                                   |
-| `all_distances_grade<g>_max<m>.json` | Cached distances for `distance_matrix.csv` (Step 4)   |
+| File                                           | Contents                                              |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| `yard_records.json`                            | Every NTAD yard record with elevation and city (1a)   |
+| `graph.gexf`                                   | The yard group graph before pruning (1c)              |
+| `ygs_dict.json`                                | The yard groups and the FAF zone each represents (1e) |
+| `hub_coords.json`                              | Geocoded hub cities                                   |
+| `edge_grades.json`                             | Ruling grade of each routed hop (Step 3)              |
+| `all_distances_grade<g>_max<m>_window<w>.json` | Cached distances for `distance_matrix.csv` (Step 4)   |
 
-Missing files are rebuilt; existing ones are read. After changing the zone settings or merges, delete `ygs_dict.json`; after changing drops or the track in use, also delete `graph.gexf`; after any network change, delete the `all_distances_*.json` files.
+Missing files are rebuilt; existing ones are read. After changing the zone settings or merges, delete `ygs_dict.json`; after changing drops or the track in use, also delete `graph.gexf`; after any network change, delete the `all_distances_*.json` files and `edge_grades.json`.
 
 ### 1a. Yard Records (`load_yard_records`)
 
-One `YardGroup` per record of the NTAD Rail Yards file (downloaded if missing), with its first coordinate, its elevation (Open-Meteo), its city and state (BigDataCloud reverse geocoding; needs `BDC_KEY`), its owner, and its track length `shape_length_km`, which ranks yard groups by size.
+One `YardGroup` per record of the NTAD Rail Yards file (downloaded if missing), with its first coordinate, its elevation (Copernicus GLO-90 DEM), its city and state (BigDataCloud reverse geocoding; needs `BDC_KEY`), its owner, and its track length `shape_length_km`, which ranks yard groups by size.
 
 ### 1b. Yard Group Changes (`yg_changes.csv`)
 
@@ -94,7 +95,7 @@ Each zone that sends or receives rail or multimodal freight (`input_data/FAF6.0.
 
 ## Step 2: Generate Trains
 
-`generate_trains` builds the freight flows once, then per category: candidate trains, the model, the yard balance check, and the trains (Step 3). Settings are under `service_design_settings` unless noted.
+`generate_trains` builds the freight flows once, grades the track of every routed hop (Step 3), then per category: candidate trains, the model, the yard balance check, and the trains (Step 3). Settings are under `service_design_settings` unless noted.
 
 ### 2a. Freight Flows (`build_commodities` in `demand.py`)
 
@@ -184,7 +185,7 @@ Each yard's weekly set-outs minus pick-ups must equal its FAF inbound minus outb
 - **Symbols:** a train with `y_s` runs per week becomes symbols of at most `max_runs_per_week` runs (10 runs: a daily symbol and a 3-day symbol), named `<category>TRN_<n>`, with random running days. Each run carries 1 / `y_s` of the weekly flows.
 - **Stops:** the ends, the work stops (pick-ups or set-outs in the solution) and crew changes. Walking the route, a crew changes at the last yard group before its duty would pass `crew.duty_hours` − `crew.terminal_hours`. If the train worked at a stop at most `crew.merge_with_work_stop_minutes` of running earlier, the change moves back to that stop (when the new crew can still run the next stretch), so no crew-only stop follows right after a work stop.
 - **Long stretches:** a stretch between two yard groups longer than one crew's duty is reported as a warning (e.g. Hutchinson, KS to Santa Rosa, NM, about 19 h for a bulk train). NTAD lists yards, not the depots or sidings where crews change on the main line.
-- **Times:** each symbol starts at a random minute of the week and runs at its category's `train_settings.speed_km_h_by_category`, slower uphill (`per_grade_speed_reduction` per 1% of grade, up to `max_speed_reduction`). At an intermediate stop it dwells by what happens there (`dwell_minutes`, in minutes):
+- **Times:** each symbol starts at a random minute of the week and runs at its category's `train_settings.speed_km_h_by_category`, slower uphill (`per_grade_speed_reduction` per 1% of grade, up to `max_speed_reduction`). This grade is a hop's rise between its two yard groups' elevations over its length; hops shorter than `grade_window_km` count as level. At an intermediate stop it dwells by what happens there (`dwell_minutes`, in minutes):
 
   | Crew change | Set-out | Pick-up | Pick-up + set-out | Set-out + crew | Pick-up + crew | All three |
   | ----------- | ------- | ------- | ----------------- | -------------- | -------------- | --------- |
@@ -201,7 +202,7 @@ Each yard's weekly set-outs minus pick-ups must equal its FAF inbound minus outb
   locomotives   = ceil(hp_per_ton × trailing_tons / locomotive_hp)
   ```
 
-  The grade is the segment's ruling grade: its steepest uphill hop of at least `min_grade_hop_km`. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
+  The grade is the segment's ruling grade: the steepest grade of its hops in its direction of travel (`RailNetwork.get_ruling_grade`). A hop's grade, from one yard group to the next, is its steepest rise over `grade_window_km` (10) of its track; a hop shorter than that has no grade (`RailNetwork.load_ruling_grades`, `grade_hops`). Each hop's track is sampled from the Copernicus GLO-90 DEM, with tunnels and bridges interpolated out (`MAX_TRACK_GRADE_PERCENT`, `TRACK_OFF_GROUND_M`). Grades are cached in `rail_network/edge_grades.json` until the graph is rebuilt or the grade settings change. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
 
 ### 3b. Circuitous Trains (`circuitous_trains.py`)
 
@@ -230,7 +231,7 @@ The report gives the balance before and after.
 | `RUNS_MON` … `RUNS_SUN`                        | 1 on the days the symbol runs                                               |
 | `DEP_DAY`, `DEP_TIME`, `ARVL_DAY`, `ARVL_TIME` | Departure and arrival; days count from the trip's start (1 = first day)     |
 
-`distance_matrix.csv` (unless `--skip-distances`): the shortest route (km) and its minutes at `train_settings.speed_km_h`, with the slowdown on grades, for every pair of yard groups in the schedule. Distances are cached in `rail_network/all_distances_grade<g>_max<m>.json`, stored at 100 km/h and rescaled, so a speed change needs no new cache.
+`distance_matrix.csv` (unless `--skip-distances`): the shortest route (km) and its minutes at `train_settings.speed_km_h`, with the slowdown on grades, for every pair of yard groups in the schedule. Distances are cached in `rail_network/all_distances_grade<g>_max<m>_window<w>.json`, stored at 100 km/h and rescaled, so a speed change needs no new cache.
 
 ---
 
@@ -248,7 +249,7 @@ The report gives the balance before and after.
 | FAF zone boundaries                | [FAF6 zones, 2022 CFS geography](https://faf.ornl.gov/faf6/data/FAF6.zip), `input_data/FAF6/`; downloaded if missing                                                                          |
 | Average distances (ton-miles)      | [FAF5.7.1](https://faf.ornl.gov/faf5/Data/Download_Files/FAF5.7.1_2018-2024.zip); downloaded if missing                                                                                       |
 | Rail lines and rail yards          | [BTS NTAD](https://geodata.bts.gov/datasets/e143f436d4774402aa8cca1e663b1d24_0) lines and [yards](https://geodata.bts.gov/datasets/e8579994d57049a6a702c3fa4af01fcf_0); downloaded if missing |
-| Yard elevations                    | [Open-Meteo](https://open-meteo.com/en/docs/elevation-api)                                                                                                                                    |
+| Yard and track elevations          | [Copernicus GLO-90](https://registry.opendata.aws/copernicus-dem/), `input_data/copernicus_dem/`; downloaded when first needed                                                                |
 | Yard cities and states; hub cities | [BigDataCloud](https://www.bigdatacloud.com/) (reverse), [Nominatim](https://nominatim.org/) (forward)                                                                                        |
 
 Sources of the default values:

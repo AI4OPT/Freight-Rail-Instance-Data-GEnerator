@@ -403,7 +403,7 @@ def build_segments(
 
         freight = on_board.get(bgn.position, 0.0)
         trailing = settings.car_weight.trailing_tons(category, freight)
-        grade = network.get_ruling_grade(leg_path, power.min_grade_hop_km)
+        grade = network.get_ruling_grade(leg_path)
         hp_per_ton = power.hp_per_ton(category, grade)
         segments.append(
             RouteSegment(

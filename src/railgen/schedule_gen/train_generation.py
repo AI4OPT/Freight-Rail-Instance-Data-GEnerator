@@ -9,6 +9,7 @@ end to even out locomotives (`circuitous_trains.py`).
 import random
 import shutil
 import time
+from itertools import pairwise
 from pathlib import Path
 
 from railgen.rail_network import RailNetwork
@@ -78,6 +79,11 @@ def generate_trains(
         log(line)
     report_lines = ["Demand", *demand_report]
     allowed = allowed_yards(network, settings)
+    # Make sure to log the solves first so they are not lost when the track or a DEM tile can't be read
+    log("grades: ruling grade along the track of every routed hop")
+    network.load_ruling_grades(
+        hop for route in routes.values() for hop in pairwise(route.path)
+    )
 
     trains: list[Train] = []
     service_of: dict[TrainSymbol, CandidateService] = {}

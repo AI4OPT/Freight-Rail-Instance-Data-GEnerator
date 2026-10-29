@@ -49,6 +49,8 @@ YARD_GROUPS_DICT_FILE = "ygs_dict.json"
 # Distance caches, one per grade setting (`build_distance_matrix.distance_cache_file`)
 ALL_DISTANCES_GLOB = "all_distances*.json"
 GRAPH_FILE = "graph.gexf"
+# Ruling grade of each hop of the graph, found along its track when a schedule first needs it. Removed when `graph.gexf` is generated.
+EDGE_GRADES_FILE = "edge_grades.json"
 # E.g. drop edge A-C if some B has A-B + B-C shorter than A-C, or longer by less than this fraction (likely the same track running through B).
 SAME_TRACK_TOLERANCE = 0.03
 # Hand fixes to the NTAD yard records. Only rows with apply = `yes` are used.
@@ -60,11 +62,14 @@ YARD_GROUP_CHANGES_FILE = "yg_changes.csv"
 HUB_COORDS_FILE = "hub_coords.json"
 # Output of every schedule run: the yard groups that represent each FAF zone, and which are hubs.
 ZONE_YARD_GROUPS_FILE = "zone_yard_groups.csv"
-ELEVATION_API_URL = "https://api.open-meteo.com/v1/elevation"  # API Docs: https://open-meteo.com/en/docs/elevation-api
-ELEVATION_API_BATCH_SIZE = 99  # API allows up to 100 coords per call, but we use 99 to avoid exceeding the rate limit
-ELEVATION_API_BATCHES_PER_MINUTE = 5  # limit is 600 coords/min; 5 x 99 stays under
-ELEVATION_API_MAX_ATTEMPTS = 3
-ELEVATION_API_RETRY_WAIT_S = 61  # the rate limit is per minute
+
+# Copernicus GLO-90 DEM as 1x1 degree tiles, for the elevation of yards and along the track of a hop.
+DEM_TILE_URL = "https://copernicus-dem-90m.s3.amazonaws.com/{name}/{name}.tif"
+DEM_DIR = INPUT_DATA_DIR / "copernicus_dem"
+DEM_DOWNLOAD_CONCURRENCY = 5  # max simultaneous tile downloads
+# The DEM is the ground surface. If we sample over a tunnel or under a bridge we'll get inaccurate exagerrated grades.
+MAX_TRACK_GRADE_PERCENT = 4.0
+TRACK_OFF_GROUND_M = 10.0
 
 # FAF6 freight data
 FAF6_ZIP_URL = "https://faf.ornl.gov/faf6/data/Download_Files/ZIP/FAF6.0.zip"
