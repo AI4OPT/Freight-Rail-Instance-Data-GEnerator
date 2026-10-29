@@ -126,7 +126,7 @@ Point at a different file with `--config`:
 uv run fridge schedule --config other-config.yaml
 ```
 
-CLI flags win over the config file, which wins over the built-in defaults.
+CLI flags win over the configuration file, which wins over the built-in defaults.
 
 ## Development
 
