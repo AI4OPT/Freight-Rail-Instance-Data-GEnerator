@@ -202,7 +202,7 @@ Each yard's weekly set-outs minus pick-ups must equal its FAF inbound minus outb
   locomotives   = ceil(hp_per_ton × trailing_tons / locomotive_hp)
   ```
 
-  The grade is the segment's ruling grade: the steepest grade of its hops in its direction of travel (`RailNetwork.get_ruling_grade`). A hop's grade, from one yard group to the next, is its steepest rise over `grade_window_km` (10) of its track; a hop shorter than that has no grade (`RailNetwork.load_ruling_grades`, `grade_hops`). Each hop's track is sampled from the Copernicus GLO-90 DEM, with tunnels and bridges interpolated out (`MAX_TRACK_GRADE_PERCENT`, `TRACK_OFF_GROUND_M`). Grades are cached in `rail_network/edge_grades.json` until the graph is rebuilt or the grade settings change. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
+  The grade is the segment's ruling grade: the steepest grade of its hops in its direction of travel (`RailNetwork.get_ruling_grade`). A hop's grade, from one yard group to the next, is its steepest rise over `grade_window_km` (default 10) of its track; a hop shorter than that has no grade (`RailNetwork.load_ruling_grades`, `grade_hops`). Each hop's track is sampled from the Copernicus GLO-90 DEM, with tunnels and bridges interpolated out (`MAX_TRACK_GRADE_PERCENT`, `TRACK_OFF_GROUND_M`). Grades are cached in `rail_network/edge_grades.json` until the graph is rebuilt or the grade settings change. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
 
 ### 3b. Circuitous Trains (`circuitous_trains.py`)
 
