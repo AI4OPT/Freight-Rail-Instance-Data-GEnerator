@@ -54,7 +54,7 @@ class Distributions(BaseModel):
     )
     dwell_time: ScenarioDistribution | str = Field(
         default_factory=lambda: _exponential(15.0),
-        description="Extra dwell minutes at a stop, on top of the planned dwell less any recovery. A delay: negative draws count as 0, so a non-negative distribution is expected.",
+        description="Dwell change in minutes at a stop, added to the planned dwell less any recovery. Positive is new delay; negative shortens the stop, never below the minimum dwell.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL

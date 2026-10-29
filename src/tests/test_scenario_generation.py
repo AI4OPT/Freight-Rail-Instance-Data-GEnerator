@@ -87,15 +87,19 @@ def test_late_train_recovers_with_the_buffer_of_the_dwell():
     )
 
 
-def test_early_train_is_not_held_and_extra_dwell_is_never_negative():
+def test_early_train_is_not_held_and_dwell_never_below_minimum():
     train = _train(("R1", 600, 900), ("R2", 960, 1200))
     # 10 min early: dwells the planned 60 min and stays early.
     assert _simulate(train, _cfg(dep=-10))["R2"] == Sample(
         dep_min_delta=-10, arvl_min_delta=-10
     )
-    # A negative draw of the extra dwell counts as 0; a positive one adds delay.
+    # A negative dwell change shortens the stop, down to the 45 min minimum dwell;
+    # a positive one adds delay.
+    assert _simulate(train, _cfg(dwell=-10))["R2"] == Sample(
+        dep_min_delta=-10, arvl_min_delta=-10
+    )
     assert _simulate(train, _cfg(dwell=-20))["R2"] == Sample(
-        dep_min_delta=0, arvl_min_delta=0
+        dep_min_delta=-15, arvl_min_delta=-15
     )
     assert _simulate(train, _cfg(dwell=7))["R2"] == Sample(
         dep_min_delta=7, arvl_min_delta=7
