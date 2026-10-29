@@ -68,7 +68,7 @@ Each quantity is the sum of the train category's sample (`default_distributions`
 | --------------------- | ------------------------ | -------------------------------------------------------------------- | ------- |
 | First departure delay | `initial_departure`      | `yard_group_dwell_distributions[origin]`                             | minutes |
 | Run time change       | `trip_time_percent_diff` | `leg_trip_time_percent_diff_distributions[bgn_yg][end_yg]` (one-way) | percent |
-| Extra dwell (≥ 0)     | `dwell_time`             | `yard_group_dwell_distributions[stop]`                               | minutes |
+| Dwell change          | `dwell_time`             | `yard_group_dwell_distributions[stop]`                               | minutes |
 
 A `region_distributions` entry has a `center` (`{lat, lon}`, or `{city, state}` geocoded with Nominatim) and a `radius_km`. Its `dwell_time` applies to every yard group within the radius (coordinates from `rail_network/ygs_dict.json`, so the network must exist), and its `trip_time_percent_diff` to every leg between two of them. A yard group or leg with a distribution from two sources is an error.
 
@@ -80,10 +80,10 @@ A clock starts at the first scheduled departure.
 
 1. **First departure:** add the departure delay.
 2. **Each leg:** add `planned_run_time × (1 + run_time_change / 100)`; this gives the actual arrival.
-3. **Each intermediate stop:** the planned dwell is a minimum dwell (`general_settings.minimum_dwell_share` × planned, the work at the stop) plus a buffer (the rest). The actual dwell is `max(minimum_dwell, planned_dwell − max(arrival_delay, 0)) + extra_dwell`:
+3. **Each intermediate stop:** the planned dwell is a minimum dwell (`general_settings.minimum_dwell_share` × planned, the work at the stop) plus a buffer (the rest). The actual dwell is `max(minimum_dwell, max(minimum_dwell, planned_dwell − max(arrival_delay, 0)) + extra_dwell)`:
    - a late train uses the buffer to recover, all of its delay if the buffer is large enough;
    - an early train is not held and dwells the planned time;
-   - `extra_dwell` is new delay at the stop (work, crew, congestion); negative draws count as 0, so a non-negative distribution (e.g. an exponential, `weibull` with `shape: 1`) is the natural choice.
+   - `extra_dwell` is the dwell change at the stop: positive is new delay (work, crew, congestion), negative a quicker stop; the dwell never goes below the minimum dwell.
 
 The deltas `actual − scheduled` of every departure and arrival are recorded, truncated to whole minutes. Delay carries down the route and its spread grows leg by leg; a late train recovers only through dwell buffers or a negative run time change. This is the usual delay propagation rule of timetable analysis (Berger et al., 2011; Goverde, 2010). A simulated trip longer than a week is kept, with a warning.
 

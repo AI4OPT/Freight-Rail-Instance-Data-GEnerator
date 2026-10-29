@@ -170,24 +170,18 @@ def simulate_day(
         assert prev_trip.end_yg == cur_trip.bgn_yg, (
             "Previous trip's end yard group does not match current trip's begin yard group."
         )
-        # Extra dwell from new problems at the stop: a delay, so never negative.
-        extra_dwell_mins = max(
-            0.0,
-            add_samples(
-                train_dists.dwell_time,
-                yg_dists.yg_dwell_distributions.get(prev_trip.end_yg),
-                rng,
-            ),
+        # Dwell change at the stop: positive is new delay, negative a quicker stop.
+        extra_dwell_mins = add_samples(
+            train_dists.dwell_time,
+            yg_dists.yg_dwell_distributions.get(prev_trip.end_yg),
+            rng,
         )
-        # The planned dwell is a minimum dwell (the work) plus a buffer. A late train
-        # uses up the buffer to recover; an early train is not held for its schedule.
         arrival_delay = running_time_actual_minutes - prev_trip.arvl_minute
-        actual_dwell_mins = (
-            max(
-                min_dwell_share * dwell_time_planned,
-                dwell_time_planned - max(arrival_delay, 0.0),
-            )
-            + extra_dwell_mins
+        min_dwell = min_dwell_share * dwell_time_planned
+        actual_dwell_mins = max(
+            min_dwell,
+            max(min_dwell, dwell_time_planned - max(arrival_delay, 0.0))
+            + extra_dwell_mins,
         )
 
         running_time_actual_minutes += actual_dwell_mins
