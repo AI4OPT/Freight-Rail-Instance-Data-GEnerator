@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from railgen.models import YgKey
+from railgen.models import YdKey
 from railgen.scenario_gen.distributions import ScenarioDistribution
 
 
@@ -14,11 +14,11 @@ class TrainDistributions:
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
-class YardGroupDistributions:
-    """Distributions used for various parts of scenario generation related to a specific yard group."""
+class YardDistributions:
+    """Distributions used for various parts of scenario generation related to a specific yard."""
 
     # Trip percentage for a specific one-way Orig->Dest rail leg
-    leg_distributions: dict[tuple[YgKey, YgKey], ScenarioDistribution]
+    leg_distributions: dict[tuple[YdKey, YdKey], ScenarioDistribution]
 
-    # Dwell delay for a specific yard group
-    yg_dwell_distributions: dict[YgKey, ScenarioDistribution]
+    # Dwell delay for a specific yard
+    yd_dwell_distributions: dict[YdKey, ScenarioDistribution]

@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from railgen.models import DayOfWeek, TrainCategory, Week, YgKey, ZoneCode
+from railgen.models import DayOfWeek, TrainCategory, Week, YdKey, ZoneCode
 from railgen.schedule_gen.attributes import TonnageByDay, TrainSymbol
 from railgen.schedule_gen.demand import (
     MULTIMODAL_MODE,
@@ -31,8 +31,8 @@ from railgen.schedule_gen.solution_to_trains import (
     split_runs,
 )
 
-A1, A2, A3 = YgKey("A1-1"), YgKey("A2-2"), YgKey("A3-3")
-B1, B2, B3 = YgKey("B1-4"), YgKey("B2-5"), YgKey("B3-6")
+A1, A2, A3 = YdKey("A1-1"), YdKey("A2-2"), YdKey("A3-3")
+B1, B2, B3 = YdKey("B1-4"), YdKey("B2-5"), YdKey("B3-6")
 
 
 def _cands() -> list[CandidateYardPair]:
@@ -152,8 +152,8 @@ def test_a_hop_longer_than_a_crew_shift_is_reported():
     assert plan.over_limit == [1]
     stretch = LongStretch(
         symbol=TrainSymbol("MTRN_1"),
-        bgn_yg=YgKey("A-1"),
-        end_yg=YgKey("B-2"),
+        bgn_yd=YdKey("A-1"),
+        end_yd=YdKey("B-2"),
         hours=14.0,
     )
     (line,) = long_stretch_lines([stretch], 12.0)
@@ -262,14 +262,14 @@ def _climbing_line():
     from railgen.rail_network import RailNetwork
     from railgen.schedule_gen.schedule_config import Config
 
-    a, b, c, d = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+    a, b, c, d = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
     network = object.__new__(RailNetwork)
     network.cfg = Config()
     network.train_speed_km_h = 40.0
-    network.ygs_graph = nx.Graph()
-    network.ygs_graph.add_edge(a, b, weight=20.0)  # +100 m over 20 km: 0.5%
-    network.ygs_graph.add_edge(b, c, weight=10.0)  # +150 m over 10 km: 1.5%
-    network.ygs_graph.add_edge(c, d, weight=1.0)  # +50 m over 1 km: 5%, a short hop
+    network.yds_graph = nx.Graph()
+    network.yds_graph.add_edge(a, b, weight=20.0)  # +100 m over 20 km: 0.5%
+    network.yds_graph.add_edge(b, c, weight=10.0)  # +150 m over 10 km: 1.5%
+    network.yds_graph.add_edge(c, d, weight=1.0)  # +50 m over 1 km: 5%, a short hop
     network.ruling_grades = {
         (a, b): 0.5,
         (b, a): 0.0,
@@ -278,7 +278,7 @@ def _climbing_line():
         (c, d): 1.2,
         (d, c): 0.0,
     }
-    network.ygs_dict = {  # ty: ignore[invalid-assignment]
+    network.yds_dict = {  # ty: ignore[invalid-assignment]
         y: SimpleNamespace(elevation=z)
         for y, z in [(a, 0.0), (b, 100.0), (c, 250.0), (d, 300.0)]
     }
@@ -358,7 +358,7 @@ def test_extraction_gives_category_and_locomotives_per_leg():
 def _line_service(sid: str, train_type: str):
     from railgen.schedule_gen.candidates import CandidateService
 
-    yards = (YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4"))
+    yards = (YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4"))
     return CandidateService(
         id=sid,
         train_type=train_type,
@@ -378,7 +378,7 @@ class _StubNetwork:
         from railgen.schedule_gen.schedule_config import Config
 
         self.cfg = Config()
-        self.ygs_dict = {y: SimpleNamespace(elevation=0.0) for y in yards}
+        self.yds_dict = {y: SimpleNamespace(elevation=0.0) for y in yards}
 
     def get_travel_time(self, path, speed_km_h=None):
         return 300.0 * (len(path) - 1)
@@ -391,7 +391,7 @@ def test_extraction_rows_match_solution():
     from railgen.schedule_gen.model import Solution
     from railgen.schedule_gen.solution_to_trains import to_trains
 
-    a, b, c, d = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+    a, b, c, d = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
     # A hand-written solution: the A-B-C-D train runs twice a week and carries, per week,
     # 1,500 t A to D, 200 t A to C, 300 t B to D and 100 t C to D.
     solution = Solution(
@@ -416,16 +416,16 @@ def test_extraction_rows_match_solution():
     train = trains[0]
     assert sum(train.days_active.get_day(x) for x in DayOfWeek) == 2
     segs = train.route
-    assert segs[0].bgn_yg == a and segs[-1].end_yg == d
-    assert segs[0].bgn_yg_reason.pick_up and segs[-1].end_yg_reason.set_out
+    assert segs[0].bgn_yd == a and segs[-1].end_yd == d
+    assert segs[0].bgn_yd_reason.pick_up and segs[-1].end_yd_reason.set_out
     # Per-run tons on the first leg: (1500 + 200) / 2 runs; B and C are work stops.
     active = next(x for x in DayOfWeek if train.days_active.get_day(x))
     assert segs[0].tonnage_by_day.get_day(active) == pytest.approx(850.0)
     # With its cars (33 t carrying 82.5 t each): 1,190 t x 1.5 hp/t -> 1 locomotive.
     assert segs[0].req_counts_by_day.get_day(active) == 1
-    assert [s.end_yg for s in segs] == [b, c, d]
+    assert [s.end_yd for s in segs] == [b, c, d]
     # 5 h hops: duty 5 at B, then B's 60 min pick-up + 5 h -> 11 h, then C would exceed 12 h.
-    assert segs[1].end_yg_reason.crew_change
+    assert segs[1].end_yd_reason.crew_change
 
 
 # --- Model (needs gurobipy and a license; skipped otherwise) ---------------------------
@@ -446,7 +446,7 @@ needs_gurobi = pytest.mark.skipif(
 )
 
 
-def _line_candidate(sid: str, path: tuple[YgKey, ...]):
+def _line_candidate(sid: str, path: tuple[YdKey, ...]):
     from railgen.schedule_gen.candidates import CandidateService
 
     n = len(path) - 1
@@ -465,7 +465,7 @@ def test_od_index_keeps_each_commodity_on_its_route():
     from railgen.schedule_gen.routes import Route
 
     # k0 runs A-B-C, k1 runs D-B-E; the A-B-E train shares A-B with k0 and B-E with k1.
-    a, b, c, d, e = (YgKey(f"{x}-{i}") for i, x in enumerate("ABCDE", start=1))
+    a, b, c, d, e = (YdKey(f"{x}-{i}") for i, x in enumerate("ABCDE", start=1))
     zp = (ZoneCode("001"), ZoneCode("002"))
     cs = [
         Commodity(
@@ -495,7 +495,7 @@ def test_od_index_keeps_each_commodity_on_its_route():
 def test_stop_events_derived_from_flows():
     from railgen.schedule_gen.model import derive_stop_events
 
-    a, b, c, d = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+    a, b, c, d = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
     services = {"S0": _line_candidate("S0", (a, b, c, d))}
     # k0 rides legs 1-3 (A to D); k1 rides leg 2 only (B to C).
     flows = {
@@ -519,7 +519,7 @@ def test_od_model_puts_short_flow_on_long_train():
     from railgen.schedule_gen.routes import Route
     from railgen.schedule_gen.solution_to_trains import deviations, solution_yard_net
 
-    a, b, c, d = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+    a, b, c, d = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
     zp = (ZoneCode("001"), ZoneCode("002"))
     cs = [
         Commodity(
@@ -615,7 +615,7 @@ def test_empty_end_legs_are_cut_and_flows_keep_their_tons():
     from railgen.schedule_gen.model import Solution
     from railgen.schedule_gen.solution_to_trains import cut_empty_legs
 
-    yards = tuple(YgKey(f"Y{i}-{i}") for i in range(6))
+    yards = tuple(YdKey(f"Y{i}-{i}") for i in range(6))
     service = _line_candidate("S0", yards)  # 5 legs of 100 km
     # Freight only on legs 2-4: commodity 0 rides 2-4, commodity 1 rides 3.
     flows = {
@@ -660,7 +660,7 @@ def test_empty_middle_legs_split_the_train():
     from railgen.schedule_gen.model import Solution
     from railgen.schedule_gen.solution_to_trains import cut_empty_legs
 
-    yards = tuple(YgKey(f"Y{i}-{i}") for i in range(7))
+    yards = tuple(YdKey(f"Y{i}-{i}") for i in range(7))
     service = _line_candidate("S0", yards)  # 6 legs of 100 km
     # Freight on legs 1-2 (commodity 0) and 5 (commodity 1); 3, 4 and 6 are empty.
     flows = {("S0", 1, 0): 300.0, ("S0", 2, 0): 300.0, ("S0", 5, 1): 80.0}
@@ -723,7 +723,7 @@ def _saved_solution_case():
     """A-B-C-D train with k0 on legs 1-3 and k1 on leg 2, as a model index and a solution."""
     from railgen.schedule_gen.model import OdModelIndex, Solution, derive_stop_events
 
-    a, b, c, d = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+    a, b, c, d = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
     zp = (ZoneCode("001"), ZoneCode("002"))
     commodities = [
         Commodity(
@@ -914,7 +914,7 @@ def test_transfer_cost_stops_a_relay():
     from railgen.schedule_gen.schedule_config import Costs
     from railgen.schedule_gen.solution_to_trains import transfers
 
-    a, b, c, e, f = (YgKey(f"{x}-{i}") for i, x in enumerate("ABCEF", start=1))
+    a, b, c, e, f = (YdKey(f"{x}-{i}") for i, x in enumerate("ABCEF", start=1))
     zp = (ZoneCode("001"), ZoneCode("002"))
     # k0 runs A-B-C. The E-A-B and B-C-F trains must run for k1 and k2 anyway, and
     # together they cover A-B and B-C, so k0 can relay over them with a change at B.

@@ -307,7 +307,7 @@
             }
           ],
           "default": null,
-          "description": "Dwell minutes distribution for every yard group in the region.",
+          "description": "Dwell minutes distribution for every yard in the region.",
           "title": "Dwell Time"
         },
         "trip_time_percent_diff": {
@@ -323,7 +323,7 @@
             }
           ],
           "default": null,
-          "description": "Trip time percent difference for every leg between two yard groups in the region.",
+          "description": "Trip time percent difference for every leg between two yards in the region.",
           "title": "Trip Time Percent Diff"
         }
       },
@@ -495,7 +495,7 @@
       "title": "Train Category Distributions Overrides",
       "type": "object"
     },
-    "yard_group_dwell_distributions": {
+    "yard_dwell_distributions": {
       "additionalProperties": {
         "anyOf": [
           {
@@ -506,8 +506,8 @@
           }
         ]
       },
-      "description": "Per-yard-group dwell minutes distributions. Also applies to first departures from the yard group.",
-      "title": "Yard Group Dwell Distributions",
+      "description": "Per-yard dwell minutes distributions. Also applies to first departures from the yard.",
+      "title": "Yard Dwell Distributions",
       "type": "object"
     },
     "leg_trip_time_percent_diff_distributions": {
@@ -529,7 +529,7 @@
       "type": "object"
     },
     "region_distributions": {
-      "description": "Distributions applied to all yard groups within a radius of a location. A yard group or leg may only get a distribution from one source.",
+      "description": "Distributions applied to all yards within a radius of a location. A yard or leg may only get a distribution from one source.",
       "items": {
         "$ref": "#/$defs/RegionDistributions"
       },

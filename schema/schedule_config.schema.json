@@ -327,7 +327,7 @@
       "description": "Settings controlling rail network generation.",
       "properties": {
         "hub_locations": {
-          "description": "Hub cities that phase-1 routes run between their hub yard groups.",
+          "description": "Hub cities that phase-1 routes run between their hub yards.",
           "items": {
             "$ref": "#/$defs/Location"
           },
@@ -336,30 +336,30 @@
         },
         "hub_radius_km": {
           "default": 50.0,
-          "description": "A hub city's hub: the largest zone yard group of its state within this many km of the city.",
+          "description": "A hub city's hub: the largest zone yard of its state within this many km of the city.",
           "exclusiveMinimum": 0,
           "title": "Hub Radius Km",
           "type": "number"
         },
-        "ygs_per_zone": {
+        "yds_per_zone": {
           "default": 3,
-          "description": "Most yard groups that represent one FAF zone.",
+          "description": "Most yards that represent one FAF zone.",
           "minimum": 1,
-          "title": "Ygs Per Zone",
+          "title": "Yds Per Zone",
           "type": "integer"
         },
-        "min_od_yg_spacing_km": {
+        "min_od_yd_spacing_km": {
           "default": 5.0,
-          "description": "Least track distance (km) between two yard groups of the same zone.",
+          "description": "Least track distance (km) between two yards of the same zone.",
           "minimum": 0,
-          "title": "Min Od Yg Spacing Km",
+          "title": "Min Od Yd Spacing Km",
           "type": "number"
         },
-        "min_od_yg_track_km": {
+        "min_od_yd_track_km": {
           "default": 2.0,
-          "description": "Least track length (km) of a zone's yard group; waived for a zone with no candidate that large.",
+          "description": "Least track length (km) of a zone's yard; waived for a zone with no candidate that large.",
           "minimum": 0,
-          "title": "Min Od Yg Track Km",
+          "title": "Min Od Yd Track Km",
           "type": "number"
         },
         "excluded_track_net_codes": {
@@ -379,7 +379,7 @@
         },
         "od_discount_factor": {
           "default": 0.7,
-          "description": "Phase-1 cost factor on connections at a zone yard group (0.7 = 30% cheaper).",
+          "description": "Phase-1 cost factor on connections at a zone yard (0.7 = 30% cheaper).",
           "title": "Od Discount Factor",
           "type": "number"
         },
@@ -432,7 +432,7 @@
         },
         "gateway_radius_km": {
           "default": 25.0,
-          "description": "Yard groups within this many km of a gateway zone's yard group are in both regions.",
+          "description": "Yards within this many km of a gateway zone's yard are in both regions.",
           "exclusiveMinimum": 0,
           "title": "Gateway Radius Km",
           "type": "number"
@@ -530,7 +530,7 @@
         },
         "work_yards_per_state": {
           "default": 3,
-          "description": "Besides zone yards, the N largest yard groups per state may host work events.",
+          "description": "Besides zone yards, the N largest yards per state may host work events.",
           "minimum": 0,
           "title": "Work Yards Per State",
           "type": "integer"

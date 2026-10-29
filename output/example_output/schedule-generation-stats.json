@@ -1,7 +1,7 @@
 {
   "generation_rng_seed": 39,
   "od_assignment": {
-    "ygs_per_zone": 3,
+    "yds_per_zone": 3,
     "zones_total": 134,
     "zones_represented": 131,
     "zones_unrepresented": [
@@ -10,12 +10,12 @@
       "159"
     ],
     "zones_under_target": 19,
-    "yard_groups_designated": 369
+    "yards_designated": 369
   },
   "output_stats": {
     "unique_route_od_pairs_count": 286,
     "unique_segment_od_pairs_count": 775,
-    "used_yard_groups_count": 371,
+    "used_yards_count": 371,
     "total_pick_ups": 545,
     "total_set_outs": 697,
     "output_rows_count": 1450

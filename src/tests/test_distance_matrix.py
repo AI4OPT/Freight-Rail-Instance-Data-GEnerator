@@ -1,4 +1,4 @@
-"""The yard group distance cache grows with the yard groups that runs need."""
+"""The yard distance cache grows with the yards that runs need."""
 
 import json
 from types import SimpleNamespace
@@ -6,16 +6,16 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 
-from railgen.models import YgKey
+from railgen.models import YdKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen import build_distance_matrix
 from railgen.schedule_gen.build_distance_matrix import (
     REFERENCE_SPEED_KM_H,
-    generate_output_yg_distances,
+    generate_output_yd_distances,
 )
 from railgen.schedule_gen.schedule_config import Config
 
-A, B, C, D = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+A, B, C, D = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
 
 
 def _climbing_line(train_speed_km_h: float) -> RailNetwork:
@@ -27,20 +27,20 @@ def _climbing_line(train_speed_km_h: float) -> RailNetwork:
     network = object.__new__(RailNetwork)
     network.cfg = Config()
     network.train_speed_km_h = train_speed_km_h
-    network.ygs_graph = nx.Graph()
+    network.yds_graph = nx.Graph()
     for u, v in [(A, B), (B, C), (C, D)]:
-        network.ygs_graph.add_edge(u, v, weight=60.0)
-    network.ygs_dict = {  # ty: ignore[invalid-assignment]
+        network.yds_graph.add_edge(u, v, weight=60.0)
+    network.yds_dict = {  # ty: ignore[invalid-assignment]
         y: SimpleNamespace(elevation=z)
         for y, z in [(A, 0.0), (B, 600.0), (C, 1200.0), (D, 1800.0)]
     }
     return network
 
 
-def _rows(network: RailNetwork, yards: set[YgKey]) -> dict[tuple[str, str], float]:
-    rows = generate_output_yg_distances(network, yards)
+def _rows(network: RailNetwork, yards: set[YdKey]) -> dict[tuple[str, str], float]:
+    rows = generate_output_yd_distances(network, yards)
     assert all(r.distance_km > 0 for r in rows)
-    return {(r.begin_yard_group, r.end_yard_group): r.distance_minutes for r in rows}
+    return {(r.begin_yard, r.end_yard): r.distance_minutes for r in rows}
 
 
 def test_distance_cache_only_adds_missing_pairs(tmp_path, monkeypatch):

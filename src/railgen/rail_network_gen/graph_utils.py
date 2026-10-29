@@ -27,7 +27,7 @@ from railgen.models import (
     Coord,
     LineStringGeometry,
     MultiLineStringGeometry,
-    YgKey,
+    YdKey,
 )
 from railgen.utils import get_progress_desc_with_padding
 
@@ -159,7 +159,7 @@ def concurrent_geocode(coords: list[Coord]) -> list[tuple[str, str]]:
             coords,
             fetch_one=_fetch_one_geocode,
             concurrency=GEOCODE_CONCURRENCY,
-            description="Geocoding yard groups...",
+            description="Geocoding yards...",
         )
     )
 
@@ -194,8 +194,8 @@ def forward_geocode(city: str, state: str) -> Coord | None:
         return None
 
 
-def get_yg_coord(geom: LineStringGeometry | MultiLineStringGeometry) -> Coord:
-    """A YardGroup's position: just the first coordinate of its geometry."""
+def get_yd_coord(geom: LineStringGeometry | MultiLineStringGeometry) -> Coord:
+    """A Yard's position: just the first coordinate of its geometry."""
     if isinstance(geom, LineStringGeometry):
         assert geom.coordinates is not None
         lon, lat = geom.coordinates[0][0], geom.coordinates[0][1]
@@ -210,42 +210,42 @@ def get_yg_coord(geom: LineStringGeometry | MultiLineStringGeometry) -> Coord:
 
 def custom_dijkstra(
     trav_graph: dict[int, dict[int, tuple[float, ...]]],
-    yg_at: list[YgKey | None],
-    src_yg_name: YgKey,
+    yd_at: list[YdKey | None],
+    src_yd_name: YdKey,
     src: int,
-) -> dict[YgKey, float]:
+) -> dict[YdKey, float]:
     """
-    Dijkstra outward from a YardGroup over the track graph. When a path hits another YardGroup's geometry, that YardGroup is a neighbor and the path stops there.
+    Dijkstra outward from a Yard over the track graph. When a path hits another Yard's geometry, that Yard is a neighbor and the path stops there.
 
     ## Args:
     - trav_graph -- track node -> neighbor track node -> lengths (km) of the track segments between them
-    - yg_at -- YardGroup name whose geometry includes each track node, or None
-    - src_yg_name -- name of the YardGroup to start from
+    - yd_at -- Yard name whose geometry includes each track node, or None
+    - src_yd_name -- name of the Yard to start from
     - src -- its track node
 
     ## Returns:
-    - Neighbor YardGroup names -> distance (km)
+    - Neighbor Yard names -> distance (km)
     """
-    dist_from_src_yg = {src: 0.0}
+    dist_from_src_yd = {src: 0.0}
     pq = [(0.0, src)]
-    found_connected_ygs: dict[YgKey, float] = {}
+    found_connected_yds: dict[YdKey, float] = {}
     while pq:
         dist_to_curr, curr = heapq.heappop(pq)
-        if dist_to_curr != dist_from_src_yg[curr]:
+        if dist_to_curr != dist_from_src_yd[curr]:
             continue
         for next_node, edge_kms in trav_graph[curr].items():
             new_dist = dist_to_curr
             for km in edge_kms:
                 new_dist += km
-            yg_at_next = yg_at[next_node]
-            if yg_at_next is not None and yg_at_next != src_yg_name:
+            yd_at_next = yd_at[next_node]
+            if yd_at_next is not None and yd_at_next != src_yd_name:
                 if (
-                    yg_at_next not in found_connected_ygs
-                    or new_dist < found_connected_ygs[yg_at_next]
+                    yd_at_next not in found_connected_yds
+                    or new_dist < found_connected_yds[yd_at_next]
                 ):
-                    found_connected_ygs[yg_at_next] = new_dist
+                    found_connected_yds[yd_at_next] = new_dist
                 continue
-            if new_dist < dist_from_src_yg.get(next_node, float("inf")):
-                dist_from_src_yg[next_node] = new_dist
+            if new_dist < dist_from_src_yd.get(next_node, float("inf")):
+                dist_from_src_yd[next_node] = new_dist
                 heapq.heappush(pq, (new_dist, next_node))
-    return found_connected_ygs
+    return found_connected_yds

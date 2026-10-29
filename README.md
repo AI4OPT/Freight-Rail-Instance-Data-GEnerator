@@ -87,9 +87,9 @@ Results are saved to `<schedule-dir>/scenarios/scenario-<timestamp>/`:
 
 `fridge scenario` looks for a config file at `configs/scenario_config.yaml`.
 
-Delays are drawn from configurable distributions per train category, with optional extra delay at yard groups, on legs or within a region; see the [scenario README](src/railgen/scenario_gen/README.md) for the distribution types and an example.
+Delays are drawn from configurable distributions per train category, with optional extra delay at yards, on legs or within a region; see the [scenario README](src/railgen/scenario_gen/README.md) for the distribution types and an example.
 
-## Rail network and yard groups
+## Rail network and yards
 
 Running `uv run fridge build-network` again asks whether to regenerate the graph. Regenerating deletes `graph.gexf` and the distance caches (`all_distances_*.json`) and reuses the yard look-ups in `rail_network/yard_records.json`.
 
@@ -101,13 +101,13 @@ uv run fridge clean
 
 Building the network after that repeats the downloads and look-ups.
 
-To list every yard group with its city and state, run:
+To list every yard with its city and state, run:
 
 ```sh
-uv run fridge yard-groups
+uv run fridge yards
 ```
 
-In a terminal this opens a scrollable pager with case-insensitive `/` search. The yard group column is the key used in schedules and the scenario config.
+In a terminal this opens a scrollable pager with case-insensitive `/` search. The yard column is the key used in schedules and the scenario config.
 
 ## Tweaking Generation
 

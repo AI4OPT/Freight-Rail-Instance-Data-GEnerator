@@ -1,4 +1,4 @@
-"""East and West instances: which yard groups are in a region, and which flows each keeps."""
+"""East and West instances: which yards are in a region, and which flows each keeps."""
 
 from itertools import pairwise
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 
-from railgen.models import YgKey, ZoneCode
+from railgen.models import YdKey, ZoneCode
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.demand import Commodity
 from railgen.schedule_gen.regions import (
@@ -22,9 +22,9 @@ from railgen.schedule_gen.schedule_config import RegionSettings, ServiceDesignSe
 
 # West: Texas, Kansas, Missouri. East: Illinois (far from Chicago), Ohio, Georgia.
 # Gateways: Chicago, and Memphis with a yard on each bank (Arkansas, Tennessee).
-TX, KS, MO = YgKey("TX-1"), YgKey("KS-2"), YgKey("MO-3")
-IL, OH, GA = YgKey("IL-4"), YgKey("OH-5"), YgKey("GA-6")
-CHI, AR_G, MEM, TN_G = YgKey("CHI-7"), YgKey("AR-8"), YgKey("MEM-9"), YgKey("TN-10")
+TX, KS, MO = YdKey("TX-1"), YdKey("KS-2"), YdKey("MO-3")
+IL, OH, GA = YdKey("IL-4"), YdKey("OH-5"), YdKey("GA-6")
+CHI, AR_G, MEM, TN_G = YdKey("CHI-7"), YdKey("AR-8"), YdKey("MEM-9"), YdKey("TN-10")
 YARDS = {
     TX: ("TX", 32.8, -97.0, None),
     KS: ("KS", 38.0, -98.0, None),
@@ -45,7 +45,7 @@ PATHS = [
     (CHI, OH),  # gateway -> East
     (CHI, IL, MEM),  # gateway -> gateway, all of it on East track
     (AR_G, MEM),  # gateway -> gateway inside one gateway area
-    (MO, IL, GA),  # a single yard group on the West side
+    (MO, IL, GA),  # a single yard on the West side
     (MO, IL),  # one leg across the line
     (TX, MO),  # West -> West
 ]
@@ -57,16 +57,16 @@ ROUTES = {
 
 def _network() -> RailNetwork:
     network = object.__new__(RailNetwork)
-    network.ygs_dict = {  # ty: ignore[invalid-assignment]
+    network.yds_dict = {  # ty: ignore[invalid-assignment]
         k: SimpleNamespace(
             state=s, coord=SimpleNamespace(lat=lat, lon=lon), od_zone_code=z
         )
         for k, (s, lat, lon, z) in YARDS.items()
     }
-    network.ygs_graph = nx.Graph()
+    network.yds_graph = nx.Graph()
     for p in PATHS:
         for a, b in pairwise(p):
-            network.ygs_graph.add_edge(a, b, weight=100.0)
+            network.yds_graph.add_edge(a, b, weight=100.0)
     return network
 
 

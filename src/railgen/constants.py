@@ -34,18 +34,18 @@ FORWARD_GEOCODE_MIN_INTERVAL_S = 1.05  # Nominatim usage policy: max ~1 request/
 # NTAD is on ArcGIS Hub. Each download is a fresh export behind a signed URL that
 # expires in about an hour
 HUB_DOWNLOAD_URL = "https://hub.arcgis.com/api/download/v1/items/{}/geojson"
-YARD_GROUPS_ITEM_ID = "e8579994d57049a6a702c3fa4af01fcf"  # USDOT_BTS "Rail Yards"
-YARD_GROUPS_FILE = "NTAD_NA_Rail_Yards.geojson"
+YARDS_ITEM_ID = "e8579994d57049a6a702c3fa4af01fcf"  # USDOT_BTS "Rail Yards"
+YARDS_FILE = "NTAD_NA_Rail_Yards.geojson"
 NA_RAIL_NETWORK_ITEM_ID = (
     "e143f436d4774402aa8cca1e663b1d24"  # USDOT_BTS "North American Rail Network Lines"
 )
 NA_RAIL_NETWORK_FILE = "NTAD_NA_Rail_Network.geojson"
 HUB_EXPORT_POLL_S = 5  # gap between status checks while an export is being generated
 HUB_EXPORT_TIMEOUT_S = 900  # give up if the export never reaches "Completed"
-# Every NTAD yard record with its elevation and city. The lookups are slow so we cache them here and build `ygs_dict.json` from this.
+# Every NTAD yard record with its elevation and city. The lookups are slow so we cache them here and build `yds_dict.json` from this.
 YARD_RECORDS_FILE = "yard_records.json"
-# Yard groups after the changes file is applied
-YARD_GROUPS_DICT_FILE = "ygs_dict.json"
+# Yards after the changes file is applied
+YARDS_DICT_FILE = "yds_dict.json"
 # Distance caches, one per grade setting (`build_distance_matrix.distance_cache_file`)
 ALL_DISTANCES_GLOB = "all_distances*.json"
 GRAPH_FILE = "graph.gexf"
@@ -57,11 +57,11 @@ SAME_TRACK_TOLERANCE = 0.03
 # - `merge`: duplicate record of a yard, folded into `merge_into`.
 # - `drop`: not a freight yard (passenger, tourist) or off the network. Only removed when `graph.gexf` is rebuilt; until then it just can't represent a FAF zone.
 # - `bar`: stays in the network but can't represent a FAF zone (probably passenger-only, unconfirmed).
-YARD_GROUP_CHANGES_FILE = "yg_changes.csv"
+YARD_CHANGES_FILE = "yd_changes.csv"
 # Geocoded hub cities (`network_settings.hub_locations`), cached so we don't hit the geocoder every load.
 HUB_COORDS_FILE = "hub_coords.json"
-# Output of every schedule run: the yard groups that represent each FAF zone, and which are hubs.
-ZONE_YARD_GROUPS_FILE = "zone_yard_groups.csv"
+# Output of every schedule run: the yards that represent each FAF zone, and which are hubs.
+ZONE_YARDS_FILE = "zone_yards.csv"
 
 # Copernicus GLO-90 DEM as 1x1 degree tiles, for the elevation of yards and along the track of a hop.
 DEM_TILE_URL = "https://copernicus-dem-90m.s3.amazonaws.com/{name}/{name}.tif"

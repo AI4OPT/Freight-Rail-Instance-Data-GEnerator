@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import pairwise
 
-from railgen.models import YgKey
+from railgen.models import YdKey
 from railgen.schedule_gen.candidates import CandidateService
 from railgen.schedule_gen.demand import Commodity
 from railgen.schedule_gen.routes import Route
@@ -11,7 +11,7 @@ from railgen.schedule_gen.schedule_config import ServiceDesignSettings
 
 KM_PER_MILE = 1.609344
 
-Arc = tuple[YgKey, YgKey]
+Arc = tuple[YdKey, YdKey]
 Leg = tuple[str, int]  # (service id, leg 1..n)
 
 
@@ -56,11 +56,11 @@ class ModelSize:
 
 def build_od_index(
     commodities: list[Commodity],
-    routes: dict[tuple[YgKey, YgKey], Route],
+    routes: dict[tuple[YdKey, YdKey], Route],
     candidates: list[CandidateService],
 ) -> OdModelIndex:
     arc_users: dict[Arc, set[int]] = defaultdict(set)
-    pair_type_tons: dict[tuple[YgKey, YgKey], dict[str, float]] = defaultdict(
+    pair_type_tons: dict[tuple[YdKey, YdKey], dict[str, float]] = defaultdict(
         lambda: defaultdict(float)
     )
     for k, c in enumerate(commodities):
@@ -93,7 +93,7 @@ def build_od_index(
 
 def model_size(index: OdModelIndex) -> ModelSize:
     """Size of the model `solve_od_model` (without building it)."""
-    balance: set[tuple[int, YgKey]] = set()
+    balance: set[tuple[int, YdKey]] = set()
     for (sid, i), ks in index.riders.items():
         stops = index.services[sid].stops
         for k in ks:
@@ -127,7 +127,7 @@ def solve_od_model(
 
     y: dict[str, gp.Var] = {}
     x: dict[tuple[str, int, int], gp.Var] = {}  # (service, leg, commodity)
-    balance: dict[tuple[int, YgKey], gp.LinExpr] = defaultdict(gp.LinExpr)
+    balance: dict[tuple[int, YdKey], gp.LinExpr] = defaultdict(gp.LinExpr)
     obj = gp.LinExpr()
 
     for sid, s in index.services.items():
@@ -157,7 +157,7 @@ def solve_od_model(
 
     # Transfers: z[k, yard] = 1 if k gets off a train at a yard that is not its destination.
     transfer_fixed, transfer_per_ton = costs.transfer_fixed, costs.transfer_per_ton
-    z: dict[tuple[int, YgKey], gp.Var] = {}
+    z: dict[tuple[int, YdKey], gp.Var] = {}
     if transfer_fixed > 0 or transfer_per_ton > 0:
         for (sid, i), ks in index.riders.items():
             yard = index.services[sid].stops[i]  # leg i ends at stop i

@@ -36,6 +36,6 @@ default_distributions:
     log_mean: 3.85
     log_stdev: 0.40
 train_category_distributions_overrides: {}
-yard_group_dwell_distributions: {}
+yard_dwell_distributions: {}
 leg_trip_time_percent_diff_distributions: {}
 region_distributions: []

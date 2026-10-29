@@ -20,6 +20,6 @@ default_distributions:
     log_stdev: 1.0
     location: 0.0
 train_category_distributions_overrides: {}
-yard_group_dwell_distributions: {}
+yard_dwell_distributions: {}
 leg_trip_time_percent_diff_distributions: {}
 region_distributions: []

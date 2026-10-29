@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass, fields
 from typing import Literal
 
-from railgen.models import DayOfWeek, TrainCategory, YgKey
+from railgen.models import DayOfWeek, TrainCategory, YdKey
 from railgen.schedule_gen.attributes import RouteSegment, Train, TrainSymbol
 from railgen.utils import HourMinute
 
@@ -16,8 +16,8 @@ class DataOutputRow:
 
     TRN_SYMB: TrainSymbol
 
-    BGN_YG: YgKey
-    END_YG: YgKey
+    BGN_YD: YdKey
+    END_YD: YdKey
 
     MON_TON: float
     TUE_TON: float
@@ -30,8 +30,8 @@ class DataOutputRow:
     IS_PU: IntBool
     IS_SO: IntBool
     IS_CG: IntBool
-    PU_TON: float  # tons picked up per run at BGN_YG
-    SO_TON: float  # tons set out per run at END_YG
+    PU_TON: float  # tons picked up per run at BGN_YD
+    SO_TON: float  # tons set out per run at END_YD
 
     MON_REQ_LOC: int
     TUE_REQ_LOC: int
@@ -68,14 +68,14 @@ class DataOutputRow:
         trip: RouteSegment,
     ) -> "DataOutputRow":
         is_crew_change = (
-            trip.bgn_yg_reason.crew_change or trip.end_yg_reason.crew_change
+            trip.bgn_yd_reason.crew_change or trip.end_yd_reason.crew_change
         )
         return DataOutputRow(
-            ROW_ID=f"{train.symbol}_{trip.bgn_yg}_{trip.end_yg}",
+            ROW_ID=f"{train.symbol}_{trip.bgn_yd}_{trip.end_yd}",
             TRN_CATG=train.category,
             TRN_SYMB=train.symbol,
-            BGN_YG=trip.bgn_yg,
-            END_YG=trip.end_yg,
+            BGN_YD=trip.bgn_yd,
+            END_YD=trip.end_yd,
             MON_TON=trip.tonnage_by_day.get_day(DayOfWeek.MONDAY),
             TUE_TON=trip.tonnage_by_day.get_day(DayOfWeek.TUESDAY),
             WED_TON=trip.tonnage_by_day.get_day(DayOfWeek.WEDNESDAY),
@@ -83,11 +83,11 @@ class DataOutputRow:
             FRI_TON=trip.tonnage_by_day.get_day(DayOfWeek.FRIDAY),
             SAT_TON=trip.tonnage_by_day.get_day(DayOfWeek.SATURDAY),
             SUN_TON=trip.tonnage_by_day.get_day(DayOfWeek.SUNDAY),
-            IS_PU=1 if trip.bgn_yg_reason.pick_up else 0,
-            IS_SO=1 if trip.end_yg_reason.set_out else 0,
+            IS_PU=1 if trip.bgn_yd_reason.pick_up else 0,
+            IS_SO=1 if trip.end_yd_reason.set_out else 0,
             IS_CG=1 if is_crew_change else 0,
-            PU_TON=trip.bgn_yg_reason.pu_amount,
-            SO_TON=trip.end_yg_reason.so_amount,
+            PU_TON=trip.bgn_yd_reason.pu_amount,
+            SO_TON=trip.end_yd_reason.so_amount,
             MON_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.MONDAY),
             TUE_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.TUESDAY),
             WED_REQ_LOC=trip.req_counts_by_day.get_day(DayOfWeek.WEDNESDAY),

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from railgen.constants import FAF5_CSV_NAME, FAF6_CSV_NAME, FAF_YEAR
 from railgen.constants import INPUT_DATA_DIR as DATA_DIR
 from railgen.faf_data import ensure_faf5_file, ensure_faf6_files
-from railgen.models import YgKey, ZoneCode
+from railgen.models import YdKey, ZoneCode
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.regions import RegionReport, cut_to_region, region_lines
 from railgen.schedule_gen.routes import Route, routes_between, routing_graph
@@ -21,8 +21,8 @@ MULTIMODAL_MODE = "5"  # FAF dms_mode "Multiple modes & mail"
 
 @dataclass(frozen=True, kw_only=True)
 class Commodity:
-    origin: YgKey
-    destination: YgKey
+    origin: YdKey
+    destination: YdKey
     train_type: str  # its freight group, or `bulk` for all B groups with `shared_bulk`
     tons_per_week: float
     zone_pair: tuple[ZoneCode, ZoneCode]
@@ -189,8 +189,8 @@ def multimodal_counts(
 
 @dataclass(frozen=True, kw_only=True)
 class CandidateYardPair:
-    origin: YgKey
-    dest: YgKey
+    origin: YdKey
+    dest: YdKey
     value: float  # route cost for inter-zone, route km for intra-zone
 
 
@@ -202,7 +202,7 @@ def select_yard_pairs(
     max_pairs: int,
     distance_tolerance: float | None,
     target_km: float | None = None,
-) -> list[tuple[YgKey, YgKey]]:
+) -> list[tuple[YdKey, YdKey]]:
     """Pick which yard pairs carry a zone pair's tons.
 
     `candidates` are (origin, destination, value).
@@ -226,9 +226,9 @@ def select_yard_pairs(
             candidates, key=lambda c: (abs(c.value - target_km), c.origin, c.dest)
         )
 
-    kept: list[tuple[YgKey, YgKey]] = []
-    used_o: set[YgKey] = set()
-    used_d: set[YgKey] = set()
+    kept: list[tuple[YdKey, YdKey]] = []
+    used_o: set[YdKey] = set()
+    used_d: set[YdKey] = set()
     for cand in ranked:
         if len(kept) == n:
             break
@@ -243,10 +243,10 @@ def select_yard_pairs(
 def assign_pair_per_category(
     candidates: list[CandidateYardPair],
     category_tons: dict[str, float],
-    size: dict[YgKey, float],
+    size: dict[YdKey, float],
     *,
     distance_tolerance: float | None,
-) -> dict[str, tuple[YgKey, YgKey]]:
+) -> dict[str, tuple[YdKey, YdKey]]:
     """One yard pair per category of a zone pair.
 
     `candidates` carry the route cost as `value`. Pairs costing more than
@@ -265,7 +265,7 @@ def assign_pair_per_category(
 
 
 def split_by_size(
-    pairs: list[tuple[YgKey, YgKey]], size: dict[YgKey, float]
+    pairs: list[tuple[YdKey, YdKey]], size: dict[YdKey, float]
 ) -> list[float]:
     """Share of the zone pair's tons for each kept pair: origin size x destination size."""
     weights = [
@@ -277,7 +277,7 @@ def split_by_size(
 
 def build_commodities(
     network: RailNetwork, settings: ServiceDesignSettings
-) -> tuple[list[Commodity], DemandReport, dict[tuple[YgKey, YgKey], Route]]:
+) -> tuple[list[Commodity], DemandReport, dict[tuple[YdKey, YdKey], Route]]:
     """Commodities, the demand report, and the route of every kept yard pair."""
     report = DemandReport()
     excluded = {
@@ -348,12 +348,12 @@ def build_commodities(
             )
             tons_with_miles[(row.origin_zone, train_type)] += row.tons_per_week
 
-    zone_to_ygs: dict[ZoneCode, list[YgKey]] = defaultdict(list)
-    size: dict[YgKey, float] = {}
-    for key, yg in network.ygs_dict.items():
-        if yg.od_zone_code is not None:
-            zone_to_ygs[yg.od_zone_code].append(key)
-            size[key] = yg.shape_length_km
+    zone_to_yds: dict[ZoneCode, list[YdKey]] = defaultdict(list)
+    size: dict[YdKey, float] = {}
+    for key, yd in network.yds_dict.items():
+        if yd.od_zone_code is not None:
+            zone_to_yds[yd.od_zone_code].append(key)
+            size[key] = yd.shape_length_km
 
     by_pair: dict[tuple[ZoneCode, ZoneCode], dict[str, float]] = defaultdict(dict)
     for (oz, dz, tt), t in tons.items():
@@ -362,19 +362,19 @@ def build_commodities(
     yard_pairs = {
         (o, d)
         for oz, dz in by_pair
-        for o in zone_to_ygs.get(oz, [])
-        for d in zone_to_ygs.get(dz, [])
+        for o in zone_to_yds.get(oz, [])
+        for d in zone_to_yds.get(dz, [])
         if o != d
     }
     routes = routes_between(network, routing_graph(network), yard_pairs)
 
-    routes_of: dict[tuple[ZoneCode, ZoneCode], list[tuple[YgKey, YgKey, Route]]] = {}
+    routes_of: dict[tuple[ZoneCode, ZoneCode], list[tuple[YdKey, YdKey, Route]]] = {}
     placeable: dict[tuple[ZoneCode, ZoneCode], dict[str, float]] = {}
     for (oz, dz), types in sorted(by_pair.items()):
         pair_routes = [
             (o, d, routes[(o, d)])
-            for o in zone_to_ygs.get(oz, [])
-            for d in zone_to_ygs.get(dz, [])
+            for o in zone_to_yds.get(oz, [])
+            for d in zone_to_yds.get(dz, [])
             if (o, d) in routes
         ]
         if not pair_routes:
@@ -397,7 +397,7 @@ def build_commodities(
     )
     rule = settings.yard_pairs
     commodities: list[Commodity] = []
-    kept_routes: dict[tuple[YgKey, YgKey], Route] = {}
+    kept_routes: dict[tuple[YdKey, YdKey], Route] = {}
     category = settings.category_of
     for (oz, dz), types in kept_by_pair.items():
         total = sum(types.values())
@@ -569,11 +569,11 @@ def demand_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[
             f"({report.long_multimodal_tons / faf:.2%} of all tons)"
         ),
         (
-            f"intra-zone in zones with a single yard group, dropped: "
+            f"intra-zone in zones with a single yard, dropped: "
             f"{report.no_second_yard_tons:,.0f} t/week"
         ),
         (
-            f"zone pairs with no yard pair (a zone has no yard group), dropped: "
+            f"zone pairs with no yard pair (a zone has no yard), dropped: "
             f"{report.no_yard_pair_tons:,.0f} t/week"
         ),
         (
@@ -641,9 +641,9 @@ def kept_lines(report: DemandReport, settings: ServiceDesignSettings) -> list[st
     ]
 
 
-def yard_targets(commodities: list[Commodity]) -> dict[YgKey, float]:
-    """Weekly inbound minus outbound tons per yard group (the balance each yard must show)."""
-    target: dict[YgKey, float] = defaultdict(float)
+def yard_targets(commodities: list[Commodity]) -> dict[YdKey, float]:
+    """Weekly inbound minus outbound tons per yard (the balance each yard must show)."""
+    target: dict[YdKey, float] = defaultdict(float)
     for c in commodities:
         target[c.destination] += c.tons_per_week
         target[c.origin] -= c.tons_per_week

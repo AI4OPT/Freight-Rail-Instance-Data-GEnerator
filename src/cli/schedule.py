@@ -9,14 +9,14 @@ from pydantic import ValidationError
 from rich import print
 from rich.progress import track
 
-from railgen.constants import TRAIN_SCHEDULE_FILE_NAME, ZONE_YARD_GROUPS_FILE
-from railgen.models import TrainCategory, YgKey
+from railgen.constants import TRAIN_SCHEDULE_FILE_NAME, ZONE_YARDS_FILE
+from railgen.models import TrainCategory, YdKey
 from railgen.rail_network import RailNetwork
-from railgen.rail_network_gen.graph_generation import write_zone_yard_groups
+from railgen.rail_network_gen.graph_generation import write_zone_yards
 from railgen.schedule_gen.attributes import TrainSymbol
 from railgen.schedule_gen.build_distance_matrix import (
     DistanceOutputRow,
-    generate_output_yg_distances,
+    generate_output_yd_distances,
 )
 from railgen.schedule_gen.schedule_config import CONFIG_FILE_PATH, load_config
 from railgen.schedule_gen.schedule_output import DataOutputRow
@@ -69,7 +69,7 @@ def generate_schedule(
         bool,
         typer.Option(
             "--skip-distances",
-            help="Skip yard group distance generation.",
+            help="Skip yard distance generation.",
             show_default=False,
         ),
     ] = False,
@@ -117,7 +117,7 @@ def generate_schedule(
     )
     stats = ScheduleGenerationStats(generation_rng_seed=seed)
 
-    # Get the yard groups graph and yard groups dict
+    # Get the yards graph and yards dict
     network = RailNetwork(config)
     stats.report_od_assignment(network.od_assignment)
 
@@ -150,20 +150,20 @@ def generate_schedule(
     )
 
     rows: list[DataOutputRow] = []
-    output_ygs: set[YgKey] = set()
+    output_yds: set[YdKey] = set()
     for train in trains:
         for trip in train.route:
             row = DataOutputRow.new(train, trip)
-            output_ygs.add(trip.bgn_yg)
-            output_ygs.add(trip.end_yg)
+            output_yds.add(trip.bgn_yd)
+            output_yds.add(trip.end_yd)
             rows.append(row)
 
     stats.report_totals(
         route_od_pairs=len(
-            {(train.route[0].bgn_yg, train.route[-1].end_yg) for train in trains}
+            {(train.route[0].bgn_yd, train.route[-1].end_yd) for train in trains}
         ),
-        segment_od_pairs=len({(r.BGN_YG, r.END_YG) for r in rows}),
-        yg_count=len(output_ygs),
+        segment_od_pairs=len({(r.BGN_YD, r.END_YD) for r in rows}),
+        yd_count=len(output_yds),
         pu_count=sum(r.IS_PU for r in rows),
         so_count=sum(r.IS_SO for r in rows),
         record_count=len(rows),
@@ -216,34 +216,30 @@ def generate_schedule(
             writer.writerow(row.to_dict())
 
     if not skip_distances:
-        yg_distances = generate_output_yg_distances(network, output_ygs)
+        yd_distances = generate_output_yd_distances(network, output_yds)
 
         DISTANCES_PATH = output_dir / "distance_matrix.csv"
-        # Write yard group distances
+        # Write yard distances
         with open(DISTANCES_PATH, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=DistanceOutputRow.get_headers())
             writer.writeheader()
 
             for dist_row in track(
-                yg_distances,
-                description=get_progress_desc_with_padding(
-                    "Writing yard group distances..."
-                ),
+                yd_distances,
+                description=get_progress_desc_with_padding("Writing yard distances..."),
                 # Only display progress bar for large files
-                disable=len(yg_distances) < 200_000,
+                disable=len(yd_distances) < 200_000,
             ):
                 writer.writerow(dist_row.to_dict())
 
         print(
-            f"[green]Wrote distances for[/green] {len(output_ygs)} [green]yard groups to[/green] [blue]{DISTANCES_PATH}[/blue]"
+            f"[green]Wrote distances for[/green] {len(output_yds)} [green]yards to[/green] [blue]{DISTANCES_PATH}[/blue]"
         )
 
-    zone_yards_path = output_dir / ZONE_YARD_GROUPS_FILE
-    write_zone_yard_groups(
-        network.ygs_dict, network.hub_yard_groups_by_city(), zone_yards_path
-    )
+    zone_yards_path = output_dir / ZONE_YARDS_FILE
+    write_zone_yards(network.yds_dict, network.hub_yards_by_city(), zone_yards_path)
     print(
-        f"[green]Wrote the yard groups of each FAF zone, with the hubs, to[/green] [blue]{zone_yards_path}[/blue]"
+        f"[green]Wrote the yards of each FAF zone, with the hubs, to[/green] [blue]{zone_yards_path}[/blue]"
     )
 
     generation_config_path = output_dir / "schedule-generation-config.yaml"

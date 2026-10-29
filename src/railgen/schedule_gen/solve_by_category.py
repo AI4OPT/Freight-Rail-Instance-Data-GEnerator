@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from railgen.models import YgKey, ZoneCode
+from railgen.models import YdKey, ZoneCode
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.candidates import CandidateService, generate_candidates
 from railgen.schedule_gen.demand import Commodity
@@ -58,8 +58,8 @@ def category_settings(
 def build_category_model(
     network: RailNetwork,
     commodities: list[Commodity],
-    routes: dict[tuple[YgKey, YgKey], Route],
-    allowed: set[YgKey],
+    routes: dict[tuple[YdKey, YdKey], Route],
+    allowed: set[YdKey],
     settings: ServiceDesignSettings,
     category: str,
     *,
@@ -165,7 +165,7 @@ def read_solution(path: Path) -> SavedSolution:
         d["id"]: CandidateService(
             id=d["id"],
             train_type=d["train_type"],
-            path=tuple(YgKey(y) for y in d["path"]),
+            path=tuple(YdKey(y) for y in d["path"]),
             stop_positions=tuple(d["stop_positions"]),
             leg_km=tuple(d["leg_km"]),
             leg_capacity_tons=tuple(d["leg_capacity_tons"]),
@@ -174,8 +174,8 @@ def read_solution(path: Path) -> SavedSolution:
     }
     commodities = [
         Commodity(
-            origin=YgKey(d["origin"]),
-            destination=YgKey(d["destination"]),
+            origin=YdKey(d["origin"]),
+            destination=YdKey(d["destination"]),
             train_type=d["train_type"],
             tons_per_week=d["tons_per_week"],
             zone_pair=(ZoneCode(d["zone_pair"][0]), ZoneCode(d["zone_pair"][1])),

@@ -116,26 +116,26 @@ class Location(BaseModel):
         return state.upper()
 
 
-class YgKey(str):
-    """Represents a unique key for a `YardGroup`, formatted as `"YARDNAME-OBJECTID"`."""
+class YdKey(str):
+    """Represents a unique key for a `Yard`, formatted as `"YARDNAME-OBJECTID"`."""
 
     @staticmethod
-    def new(yard_name: str, object_id: str) -> "YgKey":
-        return YgKey(f"{yard_name}-{object_id}")
+    def new(yard_name: str, object_id: str) -> "YdKey":
+        return YdKey(f"{yard_name}-{object_id}")
 
     @staticmethod
-    def from_raw_str(yg_key_str: str) -> "YgKey":
-        """Creates a `YgKey` from a raw string and ensures it follows the expected format."""
-        if "-" not in yg_key_str:
+    def from_raw_str(yd_key_str: str) -> "YdKey":
+        """Creates a `YdKey` from a raw string and ensures it follows the expected format."""
+        if "-" not in yd_key_str:
             raise ValueError(
-                f"Invalid YgKey format: '{yg_key_str}'. Expected format is 'YARDNAME-OBJECTID'."
+                f"Invalid YdKey format: '{yd_key_str}'. Expected format is 'YARDNAME-OBJECTID'."
             )
-        return YgKey(yg_key_str)
+        return YdKey(yd_key_str)
 
     @staticmethod
-    def parse_raw_path(raw_path: list[str]) -> list["YgKey"]:
-        """Parses a list of raw strings into a list of `YgKey` instances."""
-        return [YgKey.from_raw_str(raw) for raw in raw_path]
+    def parse_raw_path(raw_path: list[str]) -> list["YdKey"]:
+        """Parses a list of raw strings into a list of `YdKey` instances."""
+        return [YdKey.from_raw_str(raw) for raw in raw_path]
 
     # This makes pydantic happy for the TypeAdapter
     @classmethod
@@ -150,12 +150,12 @@ class YgKey(str):
         )
 
 
-class YardGroup(BaseModel):
+class Yard(BaseModel):
     """
-    A yard group: one NTAD yard record, or a few merged ones.
+    A rail yard: one NTAD yard record, or a few merged ones.
 
     - city, state -- reverse-geocoded city and 2-letter state
-    - od_zone_code -- the FAF zone it represents, if any (`is_od_yg` comes from this)
+    - od_zone_code -- the FAF zone it represents, if any (`is_od_yd` comes from this)
     """
 
     # raw properties - maybe can be removed
@@ -173,21 +173,21 @@ class YardGroup(BaseModel):
     od_zone_code: ZoneCode | None = None
     shape_length_km: float = 0.0
 
-    _key: YgKey | None = None
+    _key: YdKey | None = None
 
     @property
-    def is_od_yg(self) -> bool:
-        """Whether this YardGroup is an OD (origin/destination) YardGroup."""
+    def is_od_yd(self) -> bool:
+        """Whether this Yard is an OD (origin/destination) Yard."""
         return self.od_zone_code is not None
 
-    def key(self) -> YgKey:
-        """Returns a unique key for the YardGroup (`"YARDNAME-OBJECTID"`)."""
+    def key(self) -> YdKey:
+        """Returns a unique key for the Yard (`"YARDNAME-OBJECTID"`)."""
         if self._key is None:
-            self._key = YgKey.new(self.name, self.id)
+            self._key = YdKey.new(self.name, self.id)
         return self._key
 
 
-ygs_dict_adapter = TypeAdapter(dict[YgKey, YardGroup])
+yds_dict_adapter = TypeAdapter(dict[YdKey, Yard])
 
 
 class LineStringGeometry(BaseModel):
@@ -218,7 +218,7 @@ rail_network_adapter: TypeAdapter[list[RailNetworkFeature]] = TypeAdapter(
 )
 
 
-class YardGroupFeature(BaseModel):
+class YardFeature(BaseModel):
     """A yard record from the NTAD rail yards geojson."""
 
     type: Literal["Feature"]
@@ -227,4 +227,4 @@ class YardGroupFeature(BaseModel):
     properties: dict[str, str | int | float | None]
 
 
-yg_adapter: TypeAdapter[list[YardGroupFeature]] = TypeAdapter(list[YardGroupFeature])
+yd_adapter: TypeAdapter[list[YardFeature]] = TypeAdapter(list[YardFeature])

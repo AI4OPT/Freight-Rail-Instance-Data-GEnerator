@@ -8,16 +8,16 @@ from railgen.constants import FORWARD_GEOCODE_MIN_INTERVAL_S
 from railgen.models import (
     Coord,
     Location,
-    YardGroup,
-    YgKey,
+    Yard,
+    YdKey,
 )
 from railgen.rail_network_gen.graph_utils import forward_geocode
-from railgen.scenario_gen.distribution_groupings import YardGroupDistributions
+from railgen.scenario_gen.distribution_groupings import YardDistributions
 from railgen.scenario_gen.distributions import ScenarioDistribution
 from railgen.scenario_gen.scenario_config import ScenarioGenerationConfig
 
 
-def geocode_yg_regions(config: ScenarioGenerationConfig) -> None:
+def geocode_yd_regions(config: ScenarioGenerationConfig) -> None:
     """Geocode city/state region centers and store them on the config, so the saved config shows the coordinates."""
     for i, region in enumerate(config.region_distributions):
         if isinstance(region.center, Location):
@@ -34,13 +34,13 @@ def geocode_yg_regions(config: ScenarioGenerationConfig) -> None:
             region.geocoded_center_coordinate = coord
 
 
-def resolve_yard_group_distributions(
-    config_geocoded: ScenarioGenerationConfig, ygs_dict: dict[YgKey, YardGroup]
-) -> YardGroupDistributions:
-    """Per-yard-group and per-leg distributions, with pool names and regions resolved.
+def resolve_yard_distributions(
+    config_geocoded: ScenarioGenerationConfig, yds_dict: dict[YdKey, Yard]
+) -> YardDistributions:
+    """Per-yard and per-leg distributions, with pool names and regions resolved.
 
-    City/state regions need to be geocoded first (`geocode_yg_regions`). Raises if a yard
-    group or leg gets a distribution from more than one source.
+    City/state regions need to be geocoded first (`geocode_yd_regions`). Raises if a yard
+    or leg gets a distribution from more than one source.
     """
 
     def resolve_dist(dist: ScenarioDistribution | str) -> ScenarioDistribution:
@@ -59,8 +59,8 @@ def resolve_yard_group_distributions(
         for dest, dist in dests.items()
     }
     dwell_dists = {
-        yg: resolve_dist(v)
-        for yg, v in config_geocoded.yard_group_dwell_distributions.items()
+        yd: resolve_dist(v)
+        for yd, v in config_geocoded.yard_dwell_distributions.items()
     }
     for i, region in enumerate(config_geocoded.region_distributions):
         center_coord = (
@@ -72,29 +72,29 @@ def resolve_yard_group_distributions(
             raise ValueError(
                 f"region_distributions[{i}] center location not geocoded: {region.center}"
             )
-        ygs_inside_region = [
-            yg_key
-            for yg_key, yg in ygs_dict.items()
+        yds_inside_region = [
+            yd_key
+            for yd_key, yd in yds_dict.items()
             if haversine(
-                (center_coord.lat, center_coord.lon), (yg.coord.lat, yg.coord.lon)
+                (center_coord.lat, center_coord.lon), (yd.coord.lat, yd.coord.lon)
             )
             <= region.radius_km
         ]
         if region.dwell_time is not None:
-            for yg_key in ygs_inside_region:
-                if yg_key in dwell_dists:
+            for yd_key in yds_inside_region:
+                if yd_key in dwell_dists:
                     raise ValueError(
-                        f"region_distributions[{i}] conflicts with another distribution for {yg_key}"
+                        f"region_distributions[{i}] conflicts with another distribution for {yd_key}"
                     )
-                dwell_dists[yg_key] = resolve_dist(region.dwell_time)
+                dwell_dists[yd_key] = resolve_dist(region.dwell_time)
 
         if region.trip_time_percent_diff is not None:
-            for orig_dest in permutations(ygs_inside_region, 2):
+            for orig_dest in permutations(yds_inside_region, 2):
                 if orig_dest in leg_dists:
                     raise ValueError(
                         f"region_distributions[{i}] conflicts with another distribution for {orig_dest}"
                     )
                 leg_dists[orig_dest] = resolve_dist(region.trip_time_percent_diff)
-    return YardGroupDistributions(
-        leg_distributions=leg_dists, yg_dwell_distributions=dwell_dists
+    return YardDistributions(
+        leg_distributions=leg_dists, yd_dwell_distributions=dwell_dists
     )

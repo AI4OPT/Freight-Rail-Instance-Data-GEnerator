@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
-from railgen.models import Coord, Location, TrainCategory, YgKey
+from railgen.models import Coord, Location, TrainCategory, YdKey
 from railgen.scenario_gen.distribution_groupings import TrainDistributions
 from railgen.scenario_gen.distributions import ScenarioDistribution, WeibullDist
 from railgen.schedule_gen.schedule_config import CONFIGS_DIR
@@ -84,11 +84,11 @@ class RegionDistributions(BaseModel):
     radius_km: float = Field(description="Radius of the region in kilometers.", gt=0.0)
     dwell_time: ScenarioDistribution | str | None = Field(
         None,
-        description="Dwell minutes distribution for every yard group in the region.",
+        description="Dwell minutes distribution for every yard in the region.",
     )
     trip_time_percent_diff: ScenarioDistribution | str | None = Field(
         None,
-        description="Trip time percent difference for every leg between two yard groups in the region.",
+        description="Trip time percent difference for every leg between two yards in the region.",
     )
 
     # We make this mutable so we can set the geocoded center at runtime
@@ -114,19 +114,19 @@ class ScenarioGenerationConfig(BaseModel):
         default_factory=dict,
         description="Per-category overrides of `default_distributions`. Categories and entries left out fall back to the defaults.",
     )
-    yard_group_dwell_distributions: dict[YgKey, ScenarioDistribution | str] = Field(
+    yard_dwell_distributions: dict[YdKey, ScenarioDistribution | str] = Field(
         default_factory=dict,
-        description="Per-yard-group dwell minutes distributions. Also applies to first departures from the yard group.",
+        description="Per-yard dwell minutes distributions. Also applies to first departures from the yard.",
     )
     leg_trip_time_percent_diff_distributions: dict[
-        YgKey, dict[YgKey, ScenarioDistribution | str]
+        YdKey, dict[YdKey, ScenarioDistribution | str]
     ] = Field(
         default_factory=dict,
         description="Per-one-way-leg (origin -> destination) trip time percent difference.",
     )
     region_distributions: list[RegionDistributions] = Field(
         default_factory=list,
-        description="Distributions applied to all yard groups within a radius of a location. A yard group or leg may only get a distribution from one source.",
+        description="Distributions applied to all yards within a radius of a location. A yard or leg may only get a distribution from one source.",
     )
 
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL
@@ -142,8 +142,8 @@ class ScenarioGenerationConfig(BaseModel):
             for k, v in overrides
         ]
         refs += [
-            (f"yard_group_dwell_distributions.{yg}", v)
-            for yg, v in self.yard_group_dwell_distributions.items()
+            (f"yard_dwell_distributions.{yd}", v)
+            for yd, v in self.yard_dwell_distributions.items()
         ]
         refs += [
             (f"leg_trip_time_percent_diff_distributions.{orig}.{dest}", v)
