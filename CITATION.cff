@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: FRIDGE - Freight-Rail-Instance-Data-GEnerator
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+license: MIT
+repository-code: >-
+  https://github.com/AI4OPT/Freight-Rail-Instance-Data-GEnerator
+authors:
+  - given-names: Yunji Rosie
+    family-names: Kim
+    email: ykim985@gatech.edu
+    affiliation: Georgia Institute of Technology
+    orcid: 'https://orcid.org/0009-0001-2702-4390'
+  - given-names: Austin
+    family-names: Weeks
+    email: austin.weeks@gatech.edu
+    affiliation: Georgia Institute of Technology
+    orcid: 'https://orcid.org/0009-0008-5184-8454'
+  - family-names: Garcia
+    given-names: Jeremy
+    email: jeremy.garcia@gatech.edu
+    affiliation: Georgia Institute of Technology
+    orcid: 'https://orcid.org/0009-0003-5401-7780'

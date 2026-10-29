@@ -141,3 +141,7 @@ uv run ruff check  # linting and formatting
 - Settings and their defaults: `configs/`, `src/railgen/schedule_gen/schedule_config.py`, `src/railgen/scenario_gen/scenario_config.py`.
 - How schedules are generated: [`src/railgen/schedule_gen/README.md`](src/railgen/schedule_gen/README.md).
 - How scenarios are generated: [`src/railgen/scenario_gen/README.md`](src/railgen/scenario_gen/README.md).
+
+---
+
+If you use this software in your research, please cite it according to the [CITATION.cff](CITATION.cff) file. You can use GitHub's _Cite this repository_ feature found under the repository _About_ section to generate a citation in your preferred format.
