@@ -8,8 +8,8 @@ import typer
 from pydantic import ValidationError
 from rich import print
 
-from railgen.constants import RAIL_NETWORK_DIR, YARD_GROUPS_DICT_FILE
-from railgen.models import ygs_dict_adapter
+from railgen.constants import RAIL_NETWORK_DIR, YARDS_DICT_FILE
+from railgen.models import yds_dict_adapter
 from railgen.scenario_gen.scenario_config import (
     SCENARIO_CONFIG_FILE_PATH,
     load_scenario_config,
@@ -17,9 +17,9 @@ from railgen.scenario_gen.scenario_config import (
 from railgen.scenario_gen.scenario_generation import generate_scenario
 from railgen.scenario_gen.scenario_report import write_report
 from railgen.scenario_gen.schedule_input import parse_schedule
-from railgen.scenario_gen.yard_group_resolution import (
-    geocode_yg_regions,
-    resolve_yard_group_distributions,
+from railgen.scenario_gen.yard_resolution import (
+    geocode_yd_regions,
+    resolve_yard_distributions,
 )
 from railgen.utils import directory_timestamp
 
@@ -105,30 +105,30 @@ def generate_scenarios(
         f"{sum(len(train.trips) for train in trains)} [green]trips from[/green] [blue]{target_schedule_dir}[/blue]"
     )
 
-    ygs_dict_path = RAIL_NETWORK_DIR / YARD_GROUPS_DICT_FILE
+    yds_dict_path = RAIL_NETWORK_DIR / YARDS_DICT_FILE
     try:
-        ygs_dict = (
-            ygs_dict_adapter.validate_json(ygs_dict_path.read_text())
-            if config.region_distributions  # We only need to load yard groups if we have to geocode regions
+        yds_dict = (
+            yds_dict_adapter.validate_json(yds_dict_path.read_text())
+            if config.region_distributions  # We only need to load yards if we have to geocode regions
             else {}
         )
     except (OSError, ValidationError) as e:
         print(
-            f"[red]Failed to read[/red] [blue]{ygs_dict_path}[/blue], regenerate it with `uv run fridge build-network`: {e}"
+            f"[red]Failed to read[/red] [blue]{yds_dict_path}[/blue], regenerate it with `uv run fridge build-network`: {e}"
         )
         raise typer.Abort() from e
     try:
-        geocode_yg_regions(config)
+        geocode_yd_regions(config)
     except ValueError as e:
         print(f"[red]Failed to geocode region center[/red] {e}")
         raise typer.Abort() from e
     try:
-        yg_dists = resolve_yard_group_distributions(config, ygs_dict)
+        yd_dists = resolve_yard_distributions(config, yds_dict)
     except Exception as e:
         print(f"[red]Invalid region distributions:[/red] {e}")
         raise typer.Abort() from e
 
-    results = generate_scenario(config, trains, yg_dists)
+    results = generate_scenario(config, trains, yd_dists)
     print(
         f"[green]Generated[/green] {config.general_settings.scenario_count} [green]scenarios for[/green] {len(trains)} [green]train symbols,[/green] {len(results)} [green]trips.[/green]"
     )

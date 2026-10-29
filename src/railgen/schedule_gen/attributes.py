@@ -1,12 +1,12 @@
 import math
 from dataclasses import dataclass
 
-from railgen.models import DayOfWeek, TrainCategory, Week, YgKey
+from railgen.models import DayOfWeek, TrainCategory, Week, YdKey
 from railgen.utils import HourMinute
 
 
 @dataclass(frozen=True, kw_only=True)
-class YardGroupReason:
+class YardReason:
     pick_up: bool
     set_out: bool
     crew_change: bool
@@ -56,11 +56,11 @@ class TonnageByDay:
 
 @dataclass(frozen=True, kw_only=True)
 class RouteSegment:
-    bgn_yg: YgKey
-    end_yg: YgKey
+    bgn_yd: YdKey
+    end_yd: YdKey
     tonnage_by_day: TonnageByDay
-    bgn_yg_reason: YardGroupReason
-    end_yg_reason: YardGroupReason
+    bgn_yd_reason: YardReason
+    end_yd_reason: YardReason
     req_counts_by_day: Week[int]
     dep_day: int  # Day relative to trip start (1 = first day, 2 = second, etc.)
     arvl_day: int  # Day relative to trip start (1 = first day, 2 = second, etc.)

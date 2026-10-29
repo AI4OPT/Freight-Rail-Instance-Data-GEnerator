@@ -8,7 +8,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from railgen.constants import TRAIN_SCHEDULE_FILE_NAME
-from railgen.models import TrainCategory, Week, YgKey
+from railgen.models import TrainCategory, Week, YdKey
 from railgen.schedule_gen.attributes import TonnageByDay, TrainSymbol
 from railgen.schedule_gen.schedule_output import DataOutputRow
 from railgen.utils import get_min_from_day_and_HHMM
@@ -21,8 +21,8 @@ class ScheduledTripLeg:
     """Represents a single leg of a train's route, i.e. a single row in the CSV."""
 
     row_id: str
-    bgn_yg: YgKey
-    end_yg: YgKey
+    bgn_yd: YdKey
+    end_yd: YdKey
     tonnage_by_day: TonnageByDay
     req_counts_by_day: Week[int]
     dep_minute: int
@@ -84,9 +84,9 @@ def build_train(symbol: TrainSymbol, rows: list[dict[str, str]]) -> ScheduledTra
     trips = [build_leg(row) for row in rows]
     # Rows should be in route order. If not, something upstream went wrong.
     for prev, cur in pairwise(trips):
-        if cur.bgn_yg != prev.end_yg:
+        if cur.bgn_yd != prev.end_yd:
             raise ValueError(
-                f"{symbol} route is not contiguous: leg ends at {prev.end_yg} but next begins at {cur.bgn_yg}"
+                f"{symbol} route is not contiguous: leg ends at {prev.end_yd} but next begins at {cur.bgn_yd}"
             )
 
     return ScheduledTrain(
@@ -102,8 +102,8 @@ def build_leg(row: dict[str, str]) -> ScheduledTripLeg:
     )
     return ScheduledTripLeg(
         row_id=row["ROW_ID"],
-        bgn_yg=YgKey.from_raw_str(row["BGN_YG"]),
-        end_yg=YgKey.from_raw_str(row["END_YG"]),
+        bgn_yd=YdKey.from_raw_str(row["BGN_YD"]),
+        end_yd=YdKey.from_raw_str(row["END_YD"]),
         tonnage_by_day=TonnageByDay(tonnages=parse_week(row, "{}_TON", float)),
         req_counts_by_day=parse_week(row, "{}_REQ_LOC", int),
         dep_minute=dep_minute,

@@ -1,4 +1,4 @@
-yard_group,action,merge_into,reason,apply,note,owner,track_km,merge_into_track_km,closest_points_m,same_county,sources
+yard,action,merge_into,reason,apply,note,owner,track_km,merge_into_track_km,closest_points_m,same_county,sources
 ABERDEEN YARD-1855,merge,ABERDEEN-1854,same yard listed twice: same name apart from a bracketed tag or the word YARD,yes,,PUGET SOUND & PACIFIC RAILROAD COMPANY,0.96,2.36,0.0,True,
 ABRAMS-1394,merge,ABRAMS YARD-1395,same yard listed twice: same name apart from a bracketed tag or the word YARD,yes,,NORFOLK SOUTHERN RAILWAY COMPANY,1.71,10.02,0.0,True,
 ACCA-682,merge,ACCA-681,same yard listed twice: identical name,yes,,CSX TRANSPORTATION,1.1,17.41,0.0,False,

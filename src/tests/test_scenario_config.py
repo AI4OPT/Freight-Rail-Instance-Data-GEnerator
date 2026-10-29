@@ -4,10 +4,10 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from railgen.models import Coord, Location, TrainCategory, YardGroup, YgKey
+from railgen.models import Coord, Location, TrainCategory, Yard, YdKey
 from railgen.scenario_gen.distribution_groupings import (
     TrainDistributions,
-    YardGroupDistributions,
+    YardDistributions,
 )
 from railgen.scenario_gen.distributions import (
     AsymmetricLaplace,
@@ -19,8 +19,8 @@ from railgen.scenario_gen.scenario_config import (
     ScenarioGenerationConfig,
     load_scenario_config,
 )
-from railgen.scenario_gen.yard_group_resolution import (
-    resolve_yard_group_distributions,
+from railgen.scenario_gen.yard_resolution import (
+    resolve_yard_distributions,
 )
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -85,32 +85,32 @@ def test_distribution_names_must_resolve():
         )
 
 
-def test_yard_group_distributions_resolve():
+def test_yard_distributions_resolve():
     cfg = load_scenario_yaml(
         "distributions_pool:\n  slow: {distr_type: normal, mean: 10, stdev: 1}\n"
-        "yard_group_dwell_distributions:\n  NORRIS-1750: slow\n"
+        "yard_dwell_distributions:\n  NORRIS-1750: slow\n"
         "leg_trip_time_percent_diff_distributions:\n"
         "  NORRIS-1750:\n    NEW BOYLES-1049: {distr_type: normal, mean: 5, stdev: 2}\n"
     )
-    assert resolve_yard_group_distributions(cfg, {}) == YardGroupDistributions(
-        yg_dwell_distributions={
-            YgKey("NORRIS-1750"): NormalDist(distr_type="normal", mean=10, stdev=1)
+    assert resolve_yard_distributions(cfg, {}) == YardDistributions(
+        yd_dwell_distributions={
+            YdKey("NORRIS-1750"): NormalDist(distr_type="normal", mean=10, stdev=1)
         },
         leg_distributions={
-            (YgKey("NORRIS-1750"), YgKey("NEW BOYLES-1049")): NormalDist(
+            (YdKey("NORRIS-1750"), YdKey("NEW BOYLES-1049")): NormalDist(
                 distr_type="normal", mean=5, stdev=2
             )
         },
     )
-    with pytest.raises(ValidationError, match="Invalid YgKey format: 'NORRIS'"):
+    with pytest.raises(ValidationError, match="Invalid YdKey format: 'NORRIS'"):
         _ = load_scenario_yaml(
-            "yard_group_dwell_distributions:\n  NORRIS: {distr_type: normal, mean: 0, stdev: 1}\n"
+            "yard_dwell_distributions:\n  NORRIS: {distr_type: normal, mean: 0, stdev: 1}\n"
         )
 
 
 def test_region_distributions_resolve():
-    ygs = {
-        YgKey(f"{name}-{i}"): YardGroup(
+    yds = {
+        YdKey(f"{name}-{i}"): Yard(
             id=str(i),
             name=name,
             owner="",
@@ -125,19 +125,19 @@ def test_region_distributions_resolve():
     )
     pool = "distributions_pool:\n  slow: {distr_type: normal, mean: 10, stdev: 1}\n"
     slow = NormalDist(distr_type="normal", mean=10, stdev=1)
-    a, b = YgKey("A-0"), YgKey("B-1")
-    assert resolve_yard_group_distributions(
-        load_scenario_yaml(pool + region), ygs
-    ) == YardGroupDistributions(
-        yg_dwell_distributions={a: slow, b: slow},
+    a, b = YdKey("A-0"), YdKey("B-1")
+    assert resolve_yard_distributions(
+        load_scenario_yaml(pool + region), yds
+    ) == YardDistributions(
+        yd_dwell_distributions={a: slow, b: slow},
         leg_distributions={(a, b): slow, (b, a): slow},
     )
     with pytest.raises(ValueError, match=r"region_distributions\[0\] conflicts"):
-        _ = resolve_yard_group_distributions(
+        _ = resolve_yard_distributions(
             load_scenario_yaml(
-                pool + region + "yard_group_dwell_distributions:\n  A-0: slow\n"
+                pool + region + "yard_dwell_distributions:\n  A-0: slow\n"
             ),
-            ygs,
+            yds,
         )
     assert isinstance(
         load_scenario_yaml(

@@ -34,7 +34,7 @@ distributions_pool:
 train_category_distributions_overrides:
   I:
     initial_departure: { distr_type: normal, mean: 0, stdev: 2 }
-yard_group_dwell_distributions:
+yard_dwell_distributions:
   NORRIS-1644: congested
 leg_trip_time_percent_diff_distributions:
   NEW BOYLES-943:
@@ -46,7 +46,7 @@ region_distributions:
     dwell_time: congested
 ```
 
-Every distribution named must exist in `distributions_pool`, and every yard group key must have the form `YARDNAME-OBJECTID`. Each train and running day gets its own random generator, seeded from (seed, train symbol, day), so a train's samples do not depend on the other trains. The saved config holds the seed and count actually used.
+Every distribution named must exist in `distributions_pool`, and every yard key must have the form `YARDNAME-OBJECTID`. Each train and running day gets its own random generator, seeded from (seed, train symbol, day), so a train's samples do not depend on the other trains. The saved config holds the seed and count actually used.
 
 ---
 
@@ -66,13 +66,13 @@ Each quantity is the sum of the train category's sample (`default_distributions`
 
 | Quantity              | Train distribution       | Added place distribution                                             | Unit    |
 | --------------------- | ------------------------ | -------------------------------------------------------------------- | ------- |
-| First departure delay | `initial_departure`      | `yard_group_dwell_distributions[origin]`                             | minutes |
-| Run time change       | `trip_time_percent_diff` | `leg_trip_time_percent_diff_distributions[bgn_yg][end_yg]` (one-way) | percent |
-| Dwell change          | `dwell_time`             | `yard_group_dwell_distributions[stop]`                               | minutes |
+| First departure delay | `initial_departure`      | `yard_dwell_distributions[origin]`                                   | minutes |
+| Run time change       | `trip_time_percent_diff` | `leg_trip_time_percent_diff_distributions[bgn_yd][end_yd]` (one-way) | percent |
+| Dwell change          | `dwell_time`             | `yard_dwell_distributions[stop]`                                     | minutes |
 
-A `region_distributions` entry has a `center` (`{lat, lon}`, or `{city, state}` geocoded with Nominatim) and a `radius_km`. Its `dwell_time` applies to every yard group within the radius (coordinates from `rail_network/ygs_dict.json`, so the network must exist), and its `trip_time_percent_diff` to every leg between two of them. A yard group or leg with a distribution from two sources is an error.
+A `region_distributions` entry has a `center` (`{lat, lon}`, or `{city, state}` geocoded with Nominatim) and a `radius_km`. Its `dwell_time` applies to every yard within the radius (coordinates from `rail_network/yds_dict.json`, so the network must exist), and its `trip_time_percent_diff` to every leg between two of them. A yard or leg with a distribution from two sources is an error.
 
-Independent samples add means and variances: stdev 5 on a yard group plus stdev 5 on the category gives about 7.
+Independent samples add means and variances: stdev 5 on a yard plus stdev 5 on the category gives about 7.
 
 ### Walking the Route
 

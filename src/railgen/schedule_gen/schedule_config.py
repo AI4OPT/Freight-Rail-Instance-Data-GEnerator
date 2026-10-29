@@ -85,27 +85,27 @@ class NetworkConfig(BaseModel):
 
     hub_locations: list[Location] = Field(
         default_factory=_default_hub_locations,
-        description="Hub cities that phase-1 routes run between their hub yard groups.",
+        description="Hub cities that phase-1 routes run between their hub yards.",
     )
     hub_radius_km: float = Field(
         50.0,
         gt=0,
-        description="A hub city's hub: the largest zone yard group of its state within this many km of the city.",
+        description="A hub city's hub: the largest zone yard of its state within this many km of the city.",
     )
-    ygs_per_zone: int = Field(
+    yds_per_zone: int = Field(
         3,
         ge=1,
-        description="Most yard groups that represent one FAF zone.",
+        description="Most yards that represent one FAF zone.",
     )
-    min_od_yg_spacing_km: float = Field(
+    min_od_yd_spacing_km: float = Field(
         5.0,
         ge=0,
-        description="Least track distance (km) between two yard groups of the same zone.",
+        description="Least track distance (km) between two yards of the same zone.",
     )
-    min_od_yg_track_km: float = Field(
+    min_od_yd_track_km: float = Field(
         2.0,
         ge=0,
-        description="Least track length (km) of a zone's yard group; waived for a zone with no candidate that large.",
+        description="Least track length (km) of a zone's yard; waived for a zone with no candidate that large.",
     )
     excluded_track_net_codes: list[str] = Field(
         default_factory=lambda: ["A", "R", "X", "T", "F"],
@@ -118,7 +118,7 @@ class NetworkConfig(BaseModel):
     )
     od_discount_factor: float = Field(
         0.7,
-        description="Phase-1 cost factor on connections at a zone yard group (0.7 = 30% cheaper).",
+        description="Phase-1 cost factor on connections at a zone yard (0.7 = 30% cheaper).",
     )
     per_grade_speed_reduction: float = Field(
         0.1, description="Share of speed lost per 1% of uphill grade."
@@ -429,7 +429,7 @@ class RegionSettings(BaseModel):
     gateway_radius_km: float = Field(
         25.0,
         gt=0,
-        description="Yard groups within this many km of a gateway zone's yard group are in both regions.",
+        description="Yards within this many km of a gateway zone's yard are in both regions.",
     )
 
     model_config: ClassVar[ConfigDict] = _MODEL
@@ -519,7 +519,7 @@ class ServiceDesignSettings(BaseModel):
     work_yards_per_state: int = Field(
         3,
         ge=0,
-        description="Besides zone yards, the N largest yard groups per state may host work events.",
+        description="Besides zone yards, the N largest yards per state may host work events.",
     )
     max_trailing_tons_per_run_by_category: dict[str, float] = Field(
         default_factory=lambda: {"A": 6500.0, "M": 13000.0, "B": 17000.0, "I": 12000.0},

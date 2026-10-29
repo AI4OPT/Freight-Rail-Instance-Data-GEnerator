@@ -11,9 +11,9 @@ from railgen.constants import (
     BDC_KEY,
     GRAPH_FILE,
     RAIL_NETWORK_DIR,
-    YARD_GROUPS_DICT_FILE,
+    YARDS_DICT_FILE,
 )
-from railgen.models import ygs_dict_adapter
+from railgen.models import yds_dict_adapter
 from railgen.rail_network_gen.graph_generation import generate_or_load_network
 
 
@@ -39,20 +39,20 @@ def build_network():
     generate_or_load_network()
 
 
-def list_yard_groups():
-    """List yard groups with their city and state in an interactive pager."""
-    ygs_dict_path = RAIL_NETWORK_DIR / YARD_GROUPS_DICT_FILE
+def list_yards():
+    """List yards with their city and state in an interactive pager."""
+    yds_dict_path = RAIL_NETWORK_DIR / YARDS_DICT_FILE
     try:
-        ygs = ygs_dict_adapter.validate_json(ygs_dict_path.read_text())
+        yds = yds_dict_adapter.validate_json(yds_dict_path.read_text())
     except (OSError, ValidationError) as e:
         print(
-            f"[red]Failed to read[/red] [blue]{ygs_dict_path}[/blue], regenerate it with `uv run fridge build-network`: {e}"
+            f"[red]Failed to read[/red] [blue]{yds_dict_path}[/blue], regenerate it with `uv run fridge build-network`: {e}"
         )
         raise typer.Abort() from e
 
-    table = Table("Yard Group", "City", "State", box=None)
-    for key, yg in ygs.items():
-        table.add_row(key, yg.city, yg.state)
+    table = Table("Yard", "City", "State", box=None)
+    for key, yd in yds.items():
+        table.add_row(key, yd.city, yd.state)
     console = Console()
     if console.is_terminal:
         # Allow case-insensitive search

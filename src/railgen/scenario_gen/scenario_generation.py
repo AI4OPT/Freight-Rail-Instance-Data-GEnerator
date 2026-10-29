@@ -11,7 +11,7 @@ from rich.progress import track
 from railgen.models import DayOfWeek, Week
 from railgen.scenario_gen.distribution_groupings import (
     TrainDistributions,
-    YardGroupDistributions,
+    YardDistributions,
 )
 from railgen.scenario_gen.distributions import (
     ScenarioDistribution,
@@ -40,7 +40,7 @@ type ScenarioResult = dict[TrainRowID, Week[list[Sample] | None]]
 def generate_scenario(
     config: ScenarioGenerationConfig,
     scheduled_trains: list[ScheduledTrain],
-    yg_dists: YardGroupDistributions,
+    yd_dists: YardDistributions,
 ) -> ScenarioResult:
 
     accumulated_results: dict[TrainRowID, Week[list[Sample]]] = {}
@@ -54,7 +54,7 @@ def generate_scenario(
         scheduled_trains,
         description=get_progress_desc_with_padding("Generating Scenarios..."),
     ):
-        results = process_train(config, train, yg_dists, seed)
+        results = process_train(config, train, yd_dists, seed)
         accumulated_results.update(results)
 
     # Days with no samples become None
@@ -75,7 +75,7 @@ def generate_scenario(
 def process_train(
     config: ScenarioGenerationConfig,
     train: ScheduledTrain,
-    yg_dists: YardGroupDistributions,
+    yd_dists: YardDistributions,
     seed: int,
 ) -> dict[TrainRowID, Week[list[Sample]]]:
 
@@ -97,7 +97,7 @@ def process_train(
                 train,
                 rng=rng,
                 train_dists=dists,
-                yg_dists=yg_dists,
+                yd_dists=yd_dists,
                 min_dwell_share=config.general_settings.minimum_dwell_share,
             )
             for row, sample in simulation.items():
@@ -120,7 +120,7 @@ def simulate_day(
     *,
     rng: Generator | None = None,
     train_dists: TrainDistributions,
-    yg_dists: YardGroupDistributions,
+    yd_dists: YardDistributions,
     min_dwell_share: float,
 ) -> dict[TrainRowID, Sample]:
     """Simulates a train's full trip on one day. Without `rng`, draws from an unseeded generator."""
@@ -141,7 +141,7 @@ def simulate_day(
 
     dep_delta = add_samples(
         train_dists.initial_departure,
-        yg_dists.yg_dwell_distributions.get(first_trip.bgn_yg),
+        yd_dists.yd_dwell_distributions.get(first_trip.bgn_yd),
         rng,
     )
 
@@ -150,7 +150,7 @@ def simulate_day(
     trip_time_percent = 1 + (
         add_samples(
             train_dists.trip_time_percent_diff,
-            yg_dists.leg_distributions.get((first_trip.bgn_yg, first_trip.end_yg)),
+            yd_dists.leg_distributions.get((first_trip.bgn_yd, first_trip.end_yd)),
             rng,
         )
         # This comes back as a percentage so divide by 100 to get a scalar
@@ -167,13 +167,13 @@ def simulate_day(
     for _i, (prev_trip, cur_trip) in enumerate(pairwise(train.trips)):
         dwell_time_planned = cur_trip.dep_minute - prev_trip.arvl_minute
         # Sanity check - prev.end and cur.bgn should be the same
-        assert prev_trip.end_yg == cur_trip.bgn_yg, (
-            "Previous trip's end yard group does not match current trip's begin yard group."
+        assert prev_trip.end_yd == cur_trip.bgn_yd, (
+            "Previous trip's end yard does not match current trip's begin yard."
         )
         # Dwell change at the stop: positive is new delay, negative a quicker stop.
         extra_dwell_mins = add_samples(
             train_dists.dwell_time,
-            yg_dists.yg_dwell_distributions.get(prev_trip.end_yg),
+            yd_dists.yd_dwell_distributions.get(prev_trip.end_yd),
             rng,
         )
         arrival_delay = running_time_actual_minutes - prev_trip.arvl_minute
@@ -191,7 +191,7 @@ def simulate_day(
         trip_time_percent = 1 + (
             add_samples(
                 train_dists.trip_time_percent_diff,
-                yg_dists.leg_distributions.get((cur_trip.bgn_yg, cur_trip.end_yg)),
+                yd_dists.leg_distributions.get((cur_trip.bgn_yd, cur_trip.end_yd)),
                 rng,
             )
             / 100
@@ -215,10 +215,10 @@ def simulate_day(
 
 def add_samples(
     train_dist: ScenarioDistribution,
-    yg_dist: ScenarioDistribution | None,
+    yd_dist: ScenarioDistribution | None,
     rng: Generator,
 ) -> float:
-    """Combine train distribution sample and yard group distribution sample."""
+    """Combine train distribution sample and yard distribution sample."""
     return sample_distribution(train_dist, rng) + (
-        sample_distribution(yg_dist, rng) if yg_dist else 0
+        sample_distribution(yd_dist, rng) if yd_dist else 0
     )

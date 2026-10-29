@@ -6,15 +6,15 @@ import pytest
 from railgen.faf_data import LazyLoad
 from railgen.models import (
     Coord,
-    YardGroup,
-    YgKey,
+    Yard,
+    YdKey,
     ZoneCode,
     rail_network_adapter,
-    yg_adapter,
+    yd_adapter,
 )
 from railgen.rail_network_gen import graph_generation
 from railgen.rail_network_gen.graph_generation import (
-    _assign_od_yard_groups,
+    _assign_od_yards,
     _spaced,
     _track_closeness,
     _with_min_track,
@@ -22,7 +22,7 @@ from railgen.rail_network_gen.graph_generation import (
     drop_long_edges,
     drop_redundant_edges,
     merge_graph_nodes,
-    merge_yard_group_records,
+    merge_yard_records,
     traverse_graph,
     warn_unmatched_changes,
 )
@@ -83,8 +83,8 @@ def test_chain_of_yards_keeps_only_consecutive_edges():
     assert kept == {frozenset("AB"), frozenset("BC"), frozenset("CD")}
 
 
-def _yard(name: str, track_km: float) -> YardGroup:
-    return YardGroup(
+def _yard(name: str, track_km: float) -> Yard:
+    return Yard(
         id="1",
         name=name,
         owner="",
@@ -94,8 +94,8 @@ def _yard(name: str, track_km: float) -> YardGroup:
     )
 
 
-def _merges(pairs: dict[str, str]) -> dict[YgKey, YgKey]:
-    return {YgKey(a): YgKey(b) for a, b in pairs.items()}
+def _merges(pairs: dict[str, str]) -> dict[YdKey, YdKey]:
+    return {YdKey(a): YdKey(b) for a, b in pairs.items()}
 
 
 def test_merging_nodes_moves_edges_to_the_kept_yard_with_the_shorter_distance():
@@ -134,20 +134,20 @@ def test_merging_nodes_leaves_a_graph_generated_with_merged_records_alone():
 
 def test_merging_records_adds_the_track_length_to_the_kept_yard():
     yards = {
-        YgKey(n): _yard(n, km) for n, km in (("A", 1.0), ("B", 80.0), ("B2", 45.0))
+        YdKey(n): _yard(n, km) for n, km in (("A", 1.0), ("B", 80.0), ("B2", 45.0))
     }
-    ygs = merge_yard_group_records(yards, _merges({"B2": "B"}))
-    assert set(ygs) == {"A", "B"}
-    assert ygs[YgKey("B")].shape_length_km == 125.0
+    yds = merge_yard_records(yards, _merges({"B2": "B"}))
+    assert set(yds) == {"A", "B"}
+    assert yds[YdKey("B")].shape_length_km == 125.0
 
 
 def test_merging_records_follows_a_chain_and_skips_missing_yards():
-    yards = {YgKey(n): _yard(n, 1.0) for n in ("A", "B", "B2", "B3")}
-    ygs = merge_yard_group_records(
+    yards = {YdKey(n): _yard(n, 1.0) for n in ("A", "B", "B2", "B3")}
+    yds = merge_yard_records(
         yards, _merges({"B3": "B2", "B2": "B", "X": "B", "A": "Y"})
     )
-    assert set(ygs) == {"A", "B"}
-    assert ygs[YgKey("B")].shape_length_km == 3.0
+    assert set(yds) == {"A", "B"}
+    assert yds[YdKey("B")].shape_length_km == 3.0
 
 
 # --- Walk with dropped and merged records ----------------------------------------------
@@ -175,7 +175,7 @@ def _records(yards: dict[str, list[int]], kept: list[str]):
             for net, points in (("M", range(6)), ("A", range(5, 11)))
         ]
     )
-    raw_ygs = yg_adapter.validate_python(
+    raw_yds = yd_adapter.validate_python(
         [
             {
                 "type": "Feature",
@@ -188,8 +188,8 @@ def _records(yards: dict[str, list[int]], kept: list[str]):
             for name, points in yards.items()
         ]
     )
-    ygs = {
-        YgKey(f"{name}-1"): YardGroup(
+    yds = {
+        YdKey(f"{name}-1"): Yard(
             id="1",
             name=name,
             owner="",
@@ -198,7 +198,7 @@ def _records(yards: dict[str, list[int]], kept: list[str]):
         )
         for name in kept
     }
-    return ygs, raw_ygs, track_line
+    return yds, raw_yds, track_line
 
 
 def _walk(
@@ -207,12 +207,12 @@ def _walk(
     merges: dict[str, str],
     excluded_track_net_codes: tuple[str, ...] = (),
 ) -> dict[frozenset[str], float]:
-    ygs, raw_ygs, track_line = _records(yards, kept)
+    yds, raw_yds, track_line = _records(yards, kept)
     edges = traverse_graph(
-        ygs,
-        raw_ygs,
+        yds,
+        raw_yds,
         track_line,
-        {YgKey(f"{a}-1"): YgKey(f"{b}-1") for a, b in merges.items()},
+        {YdKey(f"{a}-1"): YdKey(f"{b}-1") for a, b in merges.items()},
         excluded_track_net_codes,
     )
     return {frozenset((a, b)): km for a, b, km in edges}
@@ -252,15 +252,15 @@ def test_walk_does_not_use_excluded_track():
 
 
 def _grade_hops(monkeypatch, yards, hops, elevation):
-    ygs, raw_ygs, track_line = _records(yards, list(yards))
-    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_ygs, track_line))
+    yds, raw_yds, track_line = _records(yards, list(yards))
+    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_yds, track_line))
     monkeypatch.setattr(
         graph_generation, "sample_elevations", lambda cs: [elevation(c) for c in cs]
     )
-    pairs = [(YgKey(f"{a}-1"), YgKey(f"{b}-1")) for a, b in hops]
+    pairs = [(YdKey(f"{a}-1"), YdKey(f"{b}-1")) for a, b in hops]
     km = {(a, b): 1.12 * abs(yards[a][0] - yards[b][0]) for a, b in hops}
     graph = nx.Graph([(*pair, {"weight": km[hop]}) for pair, hop in zip(pairs, hops)])
-    return graph_generation.grade_hops(ygs, graph, pairs, 2.0)
+    return graph_generation.grade_hops(yds, graph, pairs, 2.0)
 
 
 def test_hop_grade_follows_its_track_in_each_direction(monkeypatch):
@@ -288,20 +288,20 @@ def test_hop_grade_ignores_a_ridge_steeper_than_track(monkeypatch):
 
 def test_hop_grade_finds_track_after_merges_added_to_a_built_graph(monkeypatch):
     # The K-N edge is the walk from X, and M's merge into a missing Q is skipped.
-    ygs, raw_ygs, track_line = _records(
+    yds, raw_yds, track_line = _records(
         {"N": [0, 1, 2], "X": [4], "K": [6], "M": [8]}, ["N", "X", "K", "M"]
     )
-    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_ygs, track_line))
+    monkeypatch.setattr(graph_generation, "load_geojson", lambda: (raw_yds, track_line))
     monkeypatch.setattr(
         graph_generation, "sample_elevations", lambda cs: [0.0] * len(cs)
     )
-    edges = traverse_graph(ygs, raw_ygs, track_line)
-    merges = {YgKey("X-1"): YgKey("K-1"), YgKey("M-1"): YgKey("Q-1")}
+    edges = traverse_graph(yds, raw_yds, track_line)
+    merges = {YdKey("X-1"): YdKey("K-1"), YdKey("M-1"): YdKey("Q-1")}
     graph = merge_graph_nodes(
         nx.Graph([(a, b, {"weight": km}) for a, b, km in edges]), merges
     )
-    del ygs[YgKey("X-1")]
-    grades = graph_generation.grade_hops(ygs, graph, list(graph.edges), 2.0, merges)
+    del yds[YdKey("X-1")]
+    grades = graph_generation.grade_hops(yds, graph, list(graph.edges), 2.0, merges)
     assert set(grades) == {
         ("K-1", "N-1"),
         ("N-1", "K-1"),
@@ -325,7 +325,7 @@ def test_long_edges_are_dropped():
 
 
 def test_edge_bypassed_through_several_yards_is_dropped():
-    # A-D is 100 km; A-B-C-D is 102 km over two other yard groups (within 3%); D-E has no bypass.
+    # A-D is 100 km; A-B-C-D is 102 km over two other yards (within 3%); D-E has no bypass.
     graph = _graph(
         [
             ("A", "D", 100.0),
@@ -351,13 +351,13 @@ def test_edge_bypassed_through_several_yards_is_dropped():
     )
 
 
-# --- Choice of zone yard groups --------------------------------------------------------
+# --- Choice of zone yards --------------------------------------------------------
 
 
 def test_spaced_skips_candidates_too_close_to_one_already_taken():
     graph = _graph([("A", "B", 2.0), ("B", "C", 4.0), ("C", "D", 20.0)])
     too_close = _track_closeness(graph, 5.0)
-    order = [YgKey(name) for name in ("A", "B", "C", "D")]
+    order = [YdKey(name) for name in ("A", "B", "C", "D")]
     # B is 2 km from A; C is 6 km from A by track; D is far from both.
     assert _spaced(order, 3, too_close) == ["A", "C", "D"]
     assert _spaced(order, 2, too_close) == ["A", "C"]
@@ -365,24 +365,24 @@ def test_spaced_skips_candidates_too_close_to_one_already_taken():
 
 def test_track_distance_exactly_at_the_minimum_is_not_too_close():
     too_close = _track_closeness(_graph([("A", "B", 5.0)]), 5.0)
-    assert not too_close(YgKey("A"), YgKey("B"))
+    assert not too_close(YdKey("A"), YdKey("B"))
 
 
 def test_min_track_filters_small_yards_and_is_waived_when_none_is_large_enough():
     yards = {
-        YgKey("SMALL"): _yard("SMALL", 0.4),
-        YgKey("BIG"): _yard("BIG", 22.0),
-        YgKey("TINY"): _yard("TINY", 1.8),
+        YdKey("SMALL"): _yard("SMALL", 0.4),
+        YdKey("BIG"): _yard("BIG", 22.0),
+        YdKey("TINY"): _yard("TINY", 1.8),
     }
-    in_order = [YgKey("SMALL"), YgKey("BIG"), YgKey("TINY")]
+    in_order = [YdKey("SMALL"), YdKey("BIG"), YdKey("TINY")]
     assert _with_min_track(in_order, yards, 2.0) == ["BIG"]
-    assert _with_min_track([YgKey("SMALL"), YgKey("TINY")], yards, 2.0) == [
+    assert _with_min_track([YdKey("SMALL"), YdKey("TINY")], yards, 2.0) == [
         "SMALL",
         "TINY",
     ]
 
 
-def test_each_zone_takes_its_largest_yard_groups_inside_it(monkeypatch):
+def test_each_zone_takes_its_largest_yards_inside_it(monkeypatch):
     monkeypatch.setattr(
         graph_generation,
         "FAF_OD_ZONE_CODES",
@@ -399,36 +399,36 @@ def test_each_zone_takes_its_largest_yard_groups_inside_it(monkeypatch):
         "NOFREIGHT": 50.0,
         "OUTSIDE": 70.0,
     }
-    yards = {YgKey(n): _yard(n, km) for n, km in tracks.items()}
-    zones: dict[YgKey, ZoneCode | None] = {
-        YgKey("BIG"): ZoneCode("171"),
-        YgKey("MID"): ZoneCode("171"),
-        YgKey("BARRED"): ZoneCode("171"),
-        YgKey("SMALL"): ZoneCode("171"),
-        YgKey("RURAL"): ZoneCode("179"),
-        YgKey("NOFREIGHT"): ZoneCode("999"),
-        YgKey("OUTSIDE"): None,
+    yards = {YdKey(n): _yard(n, km) for n, km in tracks.items()}
+    zones: dict[YdKey, ZoneCode | None] = {
+        YdKey("BIG"): ZoneCode("171"),
+        YdKey("MID"): ZoneCode("171"),
+        YdKey("BARRED"): ZoneCode("171"),
+        YdKey("SMALL"): ZoneCode("171"),
+        YdKey("RURAL"): ZoneCode("179"),
+        YdKey("NOFREIGHT"): ZoneCode("999"),
+        YdKey("OUTSIDE"): None,
     }
-    stats = _assign_od_yard_groups(
+    stats = _assign_od_yards(
         yards,
         zones,
-        ygs_per_zone=3,
+        yds_per_zone=3,
         min_track_km=2.0,
-        barred={YgKey("BARRED")},
+        barred={YdKey("BARRED")},
     )
-    picked = {n: yg.od_zone_code for n, yg in yards.items() if yg.od_zone_code}
+    picked = {n: yd.od_zone_code for n, yd in yards.items() if yd.od_zone_code}
     assert picked == {"BIG": "171", "MID": "171", "RURAL": "179"}
     assert stats.zones_total == 3
     assert stats.zones_represented == 2
     assert stats.zones_unrepresented == ["109"]
     assert stats.zones_under_target == 2
-    assert stats.yard_groups_designated == 3
+    assert stats.yards_designated == 3
 
 
 def test_unmatched_changes_are_reported(capsys):
-    records = {YgKey("A-1"): _yard("A", 1.0), YgKey("B-2"): _yard("B", 1.0)}
-    merges = {YgKey("A-1"): YgKey("B-2"), YgKey("C-3"): YgKey("B-2")}
-    missing = warn_unmatched_changes(records, merges, {YgKey("D-4")}, {YgKey("B-2")})
+    records = {YdKey("A-1"): _yard("A", 1.0), YdKey("B-2"): _yard("B", 1.0)}
+    merges = {YdKey("A-1"): YdKey("B-2"), YdKey("C-3"): YdKey("B-2")}
+    missing = warn_unmatched_changes(records, merges, {YdKey("D-4")}, {YdKey("B-2")})
     assert missing == ["C-3", "D-4"]
-    assert "2 yard group(s)" in capsys.readouterr().out
+    assert "2 yard(s)" in capsys.readouterr().out
     assert warn_unmatched_changes(records, {}, set(), set()) == []

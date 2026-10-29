@@ -29,11 +29,11 @@ from railgen.constants import (
     NA_RAIL_NETWORK_ITEM_ID,
     SAME_TRACK_TOLERANCE,
     TRACK_OFF_GROUND_M,
-    YARD_GROUP_CHANGES_FILE,
-    YARD_GROUPS_DICT_FILE,
-    YARD_GROUPS_FILE,
-    YARD_GROUPS_ITEM_ID,
+    YARD_CHANGES_FILE,
     YARD_RECORDS_FILE,
+    YARDS_DICT_FILE,
+    YARDS_FILE,
+    YARDS_ITEM_ID,
 )
 from railgen.constants import INPUT_DATA_DIR as PUBLIC_DIR
 from railgen.constants import RAIL_NETWORK_DIR as GRAPH_DIR
@@ -49,26 +49,26 @@ from railgen.models import (
     Location,
     MultiLineStringGeometry,
     RailNetworkFeature,
-    YardGroup,
-    YardGroupFeature,
-    YgKey,
+    Yard,
+    YardFeature,
+    YdKey,
     ZoneCode,
     rail_network_adapter,
-    yg_adapter,
-    ygs_dict_adapter,
+    yd_adapter,
+    yds_dict_adapter,
 )
 from railgen.rail_network_gen.graph_utils import (
     concurrent_geocode,
     custom_dijkstra,
     forward_geocode,
-    get_yg_coord,
+    get_yd_coord,
     sample_elevations,
 )
 from railgen.schedule_gen.schedule_config import Config, load_config
 from railgen.stats import OdAssignmentStats
 from railgen.utils import get_progress_desc_with_padding, kilometers_to_meters
 
-YG_CHANGES_PATH = Path(__file__).parent / YARD_GROUP_CHANGES_FILE
+YD_CHANGES_PATH = Path(__file__).parent / YARD_CHANGES_FILE
 
 
 def _calc_shape_length_km(geom: LineStringGeometry | MultiLineStringGeometry) -> float:
@@ -85,47 +85,47 @@ def _calc_shape_length_km(geom: LineStringGeometry | MultiLineStringGeometry) ->
     return total
 
 
-def _never_too_close(_yg_1: YgKey, _yg_2: YgKey) -> bool:
+def _never_too_close(_yd_1: YdKey, _yd_2: YdKey) -> bool:
     return False
 
 
 def _track_closeness(
     graph: Graph, min_spacing_km: float
-) -> Callable[[YgKey, YgKey], bool]:
+) -> Callable[[YdKey, YdKey], bool]:
     """Makes a `too_close(a, b)` check: are they within `min_spacing_km` of each other by track?"""
-    near: dict[YgKey, set[str]] = {}
+    near: dict[YdKey, set[str]] = {}
 
-    def too_close(yg_1: YgKey, yg_2: YgKey) -> bool:
-        if yg_1 not in near:
+    def too_close(yd_1: YdKey, yd_2: YdKey) -> bool:
+        if yd_1 not in near:
             lengths = nx.single_source_dijkstra_path_length(
-                graph, yg_1, cutoff=min_spacing_km, weight="weight"
+                graph, yd_1, cutoff=min_spacing_km, weight="weight"
             )
-            near[yg_1] = {name for name, km in lengths.items() if km < min_spacing_km}
-        return yg_2 in near[yg_1]
+            near[yd_1] = {name for name, km in lengths.items() if km < min_spacing_km}
+        return yd_2 in near[yd_1]
 
     return too_close
 
 
 def _spaced(
-    candidates: Iterable[YgKey],
+    candidates: Iterable[YdKey],
     count: int,
-    too_close: Callable[[YgKey, YgKey], bool],
-) -> list[YgKey]:
+    too_close: Callable[[YdKey, YdKey], bool],
+) -> list[YdKey]:
     """First `count` candidates in order, skipping any too close to one already picked."""
-    chosen: list[YgKey] = []
+    chosen: list[YdKey] = []
     for candidate in candidates:
         if len(chosen) == count:
             break
-        if not any(too_close(yg, candidate) for yg in chosen):
+        if not any(too_close(yd, candidate) for yd in chosen):
             chosen.append(candidate)
     return chosen
 
 
 def _with_min_track(
-    candidates: list[YgKey], ygs_dict: dict[YgKey, YardGroup], min_track_km: float
-) -> list[YgKey]:
+    candidates: list[YdKey], yds_dict: dict[YdKey, Yard], min_track_km: float
+) -> list[YdKey]:
     """Candidates with at least `min_track_km` of track. If none qualify, return them all."""
-    large = [n for n in candidates if ygs_dict[n].shape_length_km >= min_track_km]
+    large = [n for n in candidates if yds_dict[n].shape_length_km >= min_track_km]
     return large or candidates
 
 
@@ -155,103 +155,103 @@ def hub_city_coords(hubs: list[Location]) -> dict[str, Coord]:
     }
 
 
-def _yg_zone_codes(ygs: dict[YgKey, YardGroup]) -> dict[YgKey, ZoneCode | None]:
-    """FAF zone each YardGroup lies in, by the zone boundaries (`faf_zone_of`), or None."""
+def _yd_zone_codes(yds: dict[YdKey, Yard]) -> dict[YdKey, ZoneCode | None]:
+    """FAF zone each Yard lies in, by the zone boundaries (`faf_zone_of`), or None."""
     zones = FAF_ZONES.load()
-    return {name: faf_zone_of(yg.coord, zones) for name, yg in ygs.items()}
+    return {name: faf_zone_of(yd.coord, zones) for name, yd in yds.items()}
 
 
 def _zone_members(
-    yg_zone_codes: dict[YgKey, ZoneCode | None], barred: AbstractSet[YgKey]
-) -> dict[ZoneCode, list[YgKey]]:
-    """YardGroups inside each FAF zone that sends or receives rail or multimodal freight, barred ones left out."""
-    members: dict[ZoneCode, list[YgKey]] = {}
-    for yg_key, code in yg_zone_codes.items():
-        if code is None or code not in FAF_OD_ZONE_CODES.load() or yg_key in barred:
+    yd_zone_codes: dict[YdKey, ZoneCode | None], barred: AbstractSet[YdKey]
+) -> dict[ZoneCode, list[YdKey]]:
+    """Yards inside each FAF zone that sends or receives rail or multimodal freight, barred ones left out."""
+    members: dict[ZoneCode, list[YdKey]] = {}
+    for yd_key, code in yd_zone_codes.items():
+        if code is None or code not in FAF_OD_ZONE_CODES.load() or yd_key in barred:
             continue
-        members.setdefault(code, []).append(yg_key)
+        members.setdefault(code, []).append(yd_key)
     return members
 
 
 def _od_assignment_summary(
-    assigned: dict[ZoneCode, list[YgKey]], *, ygs_per_zone: int
+    assigned: dict[ZoneCode, list[YdKey]], *, yds_per_zone: int
 ) -> OdAssignmentStats:
-    """Stats of the YardGroups `assigned` to each zone, over the zones with rail or multimodal freight."""
+    """Stats of the Yards `assigned` to each zone, over the zones with rail or multimodal freight."""
     zones = FAF_OD_ZONE_CODES.load()
-    represented = {code: ygs for code, ygs in assigned.items() if ygs}
+    represented = {code: yds for code, yds in assigned.items() if yds}
     return OdAssignmentStats(
-        ygs_per_zone=ygs_per_zone,
+        yds_per_zone=yds_per_zone,
         zones_total=len(zones),
         zones_represented=len(represented),
         zones_unrepresented=sorted(c for c in zones if c not in represented),
         zones_under_target=sum(
-            1 for ygs in represented.values() if len(ygs) < ygs_per_zone
+            1 for yds in represented.values() if len(yds) < yds_per_zone
         ),
-        yard_groups_designated=sum(len(ygs) for ygs in represented.values()),
+        yards_designated=sum(len(yds) for yds in represented.values()),
     )
 
 
-def _assign_od_yard_groups(
-    ygs_dict: dict[YgKey, YardGroup],
-    yg_zone_codes: dict[YgKey, ZoneCode | None],
+def _assign_od_yards(
+    yds_dict: dict[YdKey, Yard],
+    yd_zone_codes: dict[YdKey, ZoneCode | None],
     *,
-    ygs_per_zone: int,
+    yds_per_zone: int,
     min_spacing_km: float = 0.0,
     min_track_km: float = 0.0,
     graph: Graph | None = None,
-    barred: AbstractSet[YgKey] = frozenset(),
+    barred: AbstractSet[YdKey] = frozenset(),
 ) -> OdAssignmentStats:
-    """Pick up to `ygs_per_zone` yard groups to represent each FAF zone: the largest yard groups inside it.
+    """Pick up to `yds_per_zone` yards to represent each FAF zone: the largest yards inside it.
 
-    Barred yard groups are never picked, yard groups with at least `min_track_km` of track
+    Barred yards are never picked, yards with at least `min_track_km` of track
     come first (a zone with none that large takes smaller ones), and picks for the same
-    zone have to be at least `min_spacing_km` apart by track. A zone with no yard group
+    zone have to be at least `min_spacing_km` apart by track. A zone with no yard
     inside stays unrepresented.
 
-    Sets `od_zone_code` on the chosen YardGroups in place. Returns the stats.
+    Sets `od_zone_code` on the chosen Yards in place. Returns the stats.
     """
     too_close = (
         _track_closeness(graph, min_spacing_km)
         if graph is not None and min_spacing_km > 0
         else _never_too_close
     )
-    for yg in ygs_dict.values():
-        yg.od_zone_code = None
+    for yd in yds_dict.values():
+        yd.od_zone_code = None
 
-    assigned: dict[ZoneCode, list[YgKey]] = {}
-    for code, yg_names in _zone_members(yg_zone_codes, barred).items():
+    assigned: dict[ZoneCode, list[YdKey]] = {}
+    for code, yd_names in _zone_members(yd_zone_codes, barred).items():
         largest_first = sorted(
-            yg_names, key=lambda n: ygs_dict[n].shape_length_km, reverse=True
+            yd_names, key=lambda n: yds_dict[n].shape_length_km, reverse=True
         )
         assigned[code] = _spaced(
-            _with_min_track(largest_first, ygs_dict, min_track_km),
-            ygs_per_zone,
+            _with_min_track(largest_first, yds_dict, min_track_km),
+            yds_per_zone,
             too_close,
         )
-        for yg_key in assigned[code]:
-            ygs_dict[yg_key].od_zone_code = code
+        for yd_key in assigned[code]:
+            yds_dict[yd_key].od_zone_code = code
 
-    summary = _od_assignment_summary(assigned, ygs_per_zone=ygs_per_zone)
+    summary = _od_assignment_summary(assigned, yds_per_zone=yds_per_zone)
     summary.print_summary()
     return summary
 
 
-def write_zone_yard_groups(
-    ygs: dict[YgKey, YardGroup], hubs: dict[str, YgKey | None], path: Path
+def write_zone_yards(
+    yds: dict[YdKey, Yard], hubs: dict[str, YdKey | None], path: Path
 ) -> None:
     """
-    Write the YardGroups that represent each FAF zone with rail or multimodal freight to a CSV, largest first; a zone with none gets one row with no yard group. `hub_city` names the hub cities whose hub the YardGroup is.
+    Write the Yards that represent each FAF zone with rail or multimodal freight to a CSV, largest first; a zone with none gets one row with no yard. `hub_city` names the hub cities whose hub the Yard is.
 
     ## Args:
-    - ygs -- YardGroups by name, with their zones assigned
-    - hubs -- hub YardGroup of each hub city (`RailNetwork.hub_yard_groups_by_city`)
+    - yds -- Yards by name, with their zones assigned
+    - hubs -- hub Yard of each hub city (`RailNetwork.hub_yards_by_city`)
     - path -- the CSV to write
     """
-    assigned: dict[ZoneCode, list[YgKey]] = {}
-    for name, yg in ygs.items():
-        if yg.od_zone_code is not None:
-            assigned.setdefault(yg.od_zone_code, []).append(name)
-    hub_cities: dict[YgKey, list[str]] = {}
+    assigned: dict[ZoneCode, list[YdKey]] = {}
+    for name, yd in yds.items():
+        if yd.od_zone_code is not None:
+            assigned.setdefault(yd.od_zone_code, []).append(name)
+    hub_cities: dict[YdKey, list[str]] = {}
     for city, key in hubs.items():
         if key is not None:
             hub_cities.setdefault(key, []).append(city)
@@ -259,113 +259,111 @@ def write_zone_yard_groups(
     rows: list[tuple[ZoneCode, str, str, str, str]] = []
     for code in sorted(FAF_OD_ZONE_CODES.load()):
         names = sorted(
-            assigned.get(code, []), key=lambda n: ygs[n].shape_length_km, reverse=True
+            assigned.get(code, []), key=lambda n: yds[n].shape_length_km, reverse=True
         )
         rows += [
             (
                 code,
                 zone_names[code],
                 n,
-                f"{ygs[n].shape_length_km:.1f}",
+                f"{yds[n].shape_length_km:.1f}",
                 "; ".join(hub_cities.get(n, [])),
             )
             for n in names
         ] or [(code, zone_names[code], "", "", "")]
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(
-            ["zone_code", "zone_name", "yard_group", "track_km", "hub_city"]
-        )
+        writer.writerow(["zone_code", "zone_name", "yard", "track_km", "hub_city"])
         writer.writerows(rows)
 
 
-def assign_od_yard_groups(
-    ygs: dict[YgKey, YardGroup], graph: Graph, cfg: Config, barred: AbstractSet[YgKey]
+def assign_od_yards(
+    yds: dict[YdKey, Yard], graph: Graph, cfg: Config, barred: AbstractSet[YdKey]
 ) -> OdAssignmentStats:
     """
-    Pick the YardGroups that represent each FAF zone (rules in `_assign_od_yard_groups`).
+    Pick the Yards that represent each FAF zone (rules in `_assign_od_yards`).
 
     ## Args:
-    - ygs -- YardGroups by name; updated in place
-    - graph -- YardGroup graph, for track distances
+    - yds -- Yards by name; updated in place
+    - graph -- Yard graph, for track distances
     - cfg -- Config (`network_settings`)
-    - barred -- YardGroups that can't represent a zone
+    - barred -- Yards that can't represent a zone
 
     ## Returns:
     - The stats.
     """
     net = cfg.network_settings
-    return _assign_od_yard_groups(
-        ygs,
-        _yg_zone_codes(ygs),
-        ygs_per_zone=net.ygs_per_zone,
-        min_spacing_km=net.min_od_yg_spacing_km,
-        min_track_km=net.min_od_yg_track_km,
+    return _assign_od_yards(
+        yds,
+        _yd_zone_codes(yds),
+        yds_per_zone=net.yds_per_zone,
+        min_spacing_km=net.min_od_yd_spacing_km,
+        min_track_km=net.min_od_yd_track_km,
         graph=graph,
         barred=barred,
     )
 
 
-def od_assignment_stats(ygs: dict[YgKey, YardGroup], cfg: Config) -> OdAssignmentStats:
+def od_assignment_stats(yds: dict[YdKey, Yard], cfg: Config) -> OdAssignmentStats:
     """
-    Stats of a saved YardGroup dict, recounted from its `od_zone_code`s.
+    Stats of a saved Yard dict, recounted from its `od_zone_code`s.
 
     ## Args:
-    - ygs -- YardGroups by name, with their zones assigned
+    - yds -- Yards by name, with their zones assigned
     - cfg -- Config (`network_settings`)
 
     ## Returns:
-    - The stats, as `assign_od_yard_groups` returns them.
+    - The stats, as `assign_od_yards` returns them.
     """
-    assigned: dict[ZoneCode, list[YgKey]] = {}
-    for name, yg in ygs.items():
-        if yg.od_zone_code is not None:
-            assigned.setdefault(yg.od_zone_code, []).append(name)
+    assigned: dict[ZoneCode, list[YdKey]] = {}
+    for name, yd in yds.items():
+        if yd.od_zone_code is not None:
+            assigned.setdefault(yd.od_zone_code, []).append(name)
     return _od_assignment_summary(
-        assigned, ygs_per_zone=cfg.network_settings.ygs_per_zone
+        assigned, yds_per_zone=cfg.network_settings.yds_per_zone
     )
 
 
-def _kept_name(name: YgKey, merges: dict[YgKey, YgKey]) -> YgKey:
-    """Follow merges to the YardGroup that `name` ends up in (merges can chain)."""
+def _kept_name(name: YdKey, merges: dict[YdKey, YdKey]) -> YdKey:
+    """Follow merges to the Yard that `name` ends up in (merges can chain)."""
     seen = {name}
     while name in merges:
         name = merges[name]
         if name in seen:
-            raise ValueError(f"YardGroups merged into each other: {sorted(seen)}")
+            raise ValueError(f"Yards merged into each other: {sorted(seen)}")
         seen.add(name)
     return name
 
 
 def _merged_name(
-    name: YgKey, ygs: Collection[YgKey], merges: dict[YgKey, YgKey]
-) -> YgKey:
-    """`_kept_name`, or `name` itself when that YardGroup is missing and the merge is skipped (`merge_yard_group_records`)."""
+    name: YdKey, yds: Collection[YdKey], merges: dict[YdKey, YdKey]
+) -> YdKey:
+    """`_kept_name`, or `name` itself when that Yard is missing and the merge is skipped (`merge_yard_records`)."""
     kept = _kept_name(name, merges)
-    return kept if kept in ygs else name
+    return kept if kept in yds else name
 
 
 def track_graph(
-    ygs: dict[YgKey, YardGroup],
-    raw_ygs: list[YardGroupFeature],
+    yds: dict[YdKey, Yard],
+    raw_yds: list[YardFeature],
     raw_network: list[RailNetworkFeature],
-    merges: dict[YgKey, YgKey] | None = None,
+    merges: dict[YdKey, YdKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
-) -> tuple[dict[tuple[float, float], int], list[dict[int, float]], list[YgKey | None]]:
+) -> tuple[dict[tuple[float, float], int], list[dict[int, float]], list[YdKey | None]]:
     """
-    The track the walk of `traverse_graph` uses, and the YardGroup of every track node on a YardGroup's geometry.
+    The track the walk of `traverse_graph` uses, and the Yard of every track node on a Yard's geometry.
 
     ## Args:
-    - ygs -- YardGroups by name
-    - raw_ygs -- yard features. A merged record's track counts as track of the YardGroup it's merged into.
+    - yds -- Yards by name
+    - raw_yds -- yard features. A merged record's track counts as track of the Yard it's merged into.
     - raw_network -- rail line features
-    - merges -- merged YardGroup name -> the one it's merged into
+    - merges -- merged Yard name -> the one it's merged into
     - excluded_track_net_codes -- `NET` codes the walk skips (abandoned lines, ferries, ...)
 
     ## Returns:
     - Track node of each (lat, lon), numbered in order
     - Neighbor track node -> km, for each track node
-    - YardGroup name whose geometry includes each track node, or None
+    - Yard name whose geometry includes each track node, or None
     """
     # Track nodes are numbered: (lat, lon) -> node, and adj[node] is neighbor node -> km.
     nodes: dict[tuple[float, float], int] = {}
@@ -380,17 +378,17 @@ def track_graph(
         adj += [{} for _ in range(len(nodes) - len(adj))]
         for c1, c2, n1, n2 in zip(coords, coords[1:], line, line[1:]):
             adj[n1][n2] = adj[n2][n1] = float(haversine(c1, c2, unit=Unit.KILOMETERS))
-    # The YardGroup whose geometry includes each track node. custom_dijkstra stops when it hits one.
-    yg_at: list[YgKey | None] = [None] * len(adj)
-    for yg_feat in track(
-        raw_ygs, get_progress_desc_with_padding("Building YG geometry map...")
+    # The Yard whose geometry includes each track node. custom_dijkstra stops when it hits one.
+    yd_at: list[YdKey | None] = [None] * len(adj)
+    for yd_feat in track(
+        raw_yds, get_progress_desc_with_padding("Building YD geometry map...")
     ):
-        yg_id = str(yg_feat.properties.get("OBJECTID"))
-        yg_name_str = str(yg_feat.properties.get("YARDNAME"))
-        yg_key = _merged_name(YgKey.new(yg_name_str, yg_id), ygs, merges or {})
-        if yg_key not in ygs:
+        yd_id = str(yd_feat.properties.get("OBJECTID"))
+        yd_name_str = str(yd_feat.properties.get("YARDNAME"))
+        yd_key = _merged_name(YdKey.new(yd_name_str, yd_id), yds, merges or {})
+        if yd_key not in yds:
             continue
-        geom = yg_feat.geometry
+        geom = yd_feat.geometry
         lines = (
             [geom.coordinates]
             if isinstance(geom, LineStringGeometry)
@@ -400,35 +398,35 @@ def track_graph(
             for cp in line:
                 node = nodes.get((cp[1], cp[0]))
                 if node is not None:
-                    yg_at[node] = yg_key
-    return nodes, adj, yg_at
+                    yd_at[node] = yd_key
+    return nodes, adj, yd_at
 
 
 def traverse_graph(
-    ygs: dict[YgKey, YardGroup],
-    raw_ygs: list[YardGroupFeature],
+    yds: dict[YdKey, Yard],
+    raw_yds: list[YardFeature],
     raw_network: list[RailNetworkFeature],
-    merges: dict[YgKey, YgKey] | None = None,
+    merges: dict[YdKey, YdKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
-) -> set[tuple[YgKey, YgKey, float]]:
+) -> set[tuple[YdKey, YdKey, float]]:
     """
-    Walk the rail network out from every YardGroup (`custom_dijkstra`) and collect YardGroup-to-YardGroup edges. Arguments as for `track_graph`.
+    Walk the rail network out from every Yard (`custom_dijkstra`) and collect Yard-to-Yard edges. Arguments as for `track_graph`.
 
     ## Returns:
-    - Set of (YardGroup 1, YardGroup 2, km), keeping the shortest distance per pair.
+    - Set of (Yard 1, Yard 2, km), keeping the shortest distance per pair.
     """
-    nodes, adj, yg_at = track_graph(
-        ygs, raw_ygs, raw_network, merges, excluded_track_net_codes
+    nodes, adj, yd_at = track_graph(
+        yds, raw_yds, raw_network, merges, excluded_track_net_codes
     )
     srcs = {
         name: nodes[coord]
-        for name, yg in ygs.items()
-        if (coord := (yg.coord.lat, yg.coord.lon)) in nodes
+        for name, yd in yds.items()
+        if (coord := (yd.coord.lat, yd.coord.lon)) in nodes
     }
     # Fold each run of plain track (no yard, no junction) into one edge, about 10x fewer nodes to walk.
     # The edge keeps its segment lengths: summing them up front rounds differently and flips exact ties in drop_redundant_edges.
-    # The nodes next to a start stay: a start that's also on another YardGroup is reached by turning back there.
-    keep = [len(a) != 2 or y is not None for a, y in zip(adj, yg_at)]
+    # The nodes next to a start stay: a start that's also on another Yard is reached by turning back there.
+    keep = [len(a) != 2 or y is not None for a, y in zip(adj, yd_at)]
     for src in srcs.values():
         keep[src] = True
         for n in adj[src]:
@@ -445,86 +443,86 @@ def traverse_graph(
             if end != start and (end not in out or sum(kms) < sum(out[end])):
                 out[end] = tuple(kms)
 
-    edges: list[tuple[YgKey, YgKey, float]] = []
-    for src_yg_name, src in track(
+    edges: list[tuple[YdKey, YdKey, float]] = []
+    for src_yd_name, src in track(
         list(srcs.items()),
-        description=get_progress_desc_with_padding("Building YG graph..."),
+        description=get_progress_desc_with_padding("Building YD graph..."),
     ):
-        found_connected_ygs = custom_dijkstra(trav_graph, yg_at, src_yg_name, src)
-        for neigh_yg_name, dist_to_neigh_yg in found_connected_ygs.items():
-            edges.append((src_yg_name, neigh_yg_name, dist_to_neigh_yg))
-    best: dict[tuple[YgKey, YgKey], float] = {}
-    for yg_1, yg_2, dist in edges:
-        yg_pair = (yg_1, yg_2) if yg_1 <= yg_2 else (yg_2, yg_1)
-        if yg_pair not in best or dist < best[yg_pair]:
-            best[yg_pair] = dist
+        found_connected_yds = custom_dijkstra(trav_graph, yd_at, src_yd_name, src)
+        for neigh_yd_name, dist_to_neigh_yd in found_connected_yds.items():
+            edges.append((src_yd_name, neigh_yd_name, dist_to_neigh_yd))
+    best: dict[tuple[YdKey, YdKey], float] = {}
+    for yd_1, yd_2, dist in edges:
+        yd_pair = (yd_1, yd_2) if yd_1 <= yd_2 else (yd_2, yd_1)
+        if yd_pair not in best or dist < best[yd_pair]:
+            best[yd_pair] = dist
     norm_edges = {
-        (yg_name_1, yg_name_2, distance)
-        for (yg_name_1, yg_name_2), distance in best.items()
+        (yd_name_1, yd_name_2, distance)
+        for (yd_name_1, yd_name_2), distance in best.items()
     }
     return norm_edges
 
 
 def grade_hops(
-    ygs: dict[YgKey, YardGroup],
-    ygs_graph: Graph,
-    hops: Collection[tuple[YgKey, YgKey]],
+    yds: dict[YdKey, Yard],
+    yds_graph: Graph,
+    hops: Collection[tuple[YdKey, YdKey]],
     window_km: float,
-    merges: dict[YgKey, YgKey] | None = None,
+    merges: dict[YdKey, YdKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
-) -> dict[tuple[YgKey, YgKey], float]:
+) -> dict[tuple[YdKey, YdKey], float]:
     """
-    Steepest ascending grade, in percent, along the track of each hop of the YardGroup graph. The grade at a track coordinate is its rise over the last `window_km` of track; a hop shorter than that has no grade. Elevations over tunnels and under bridges are interpolated first (`MAX_TRACK_GRADE_PERCENT`).
+    Steepest ascending grade, in percent, along the track of each hop of the Yard graph. The grade at a track coordinate is its rise over the last `window_km` of track; a hop shorter than that has no grade. Elevations over tunnels and under bridges are interpolated first (`MAX_TRACK_GRADE_PERCENT`).
 
-    The track of a hop is the walk of `traverse_graph` between its YardGroups: the shorter of the walks from either one or a record merged into it, searched back from the other's geometry no farther than the length of the edge.
+    The track of a hop is the walk of `traverse_graph` between its Yards: the shorter of the walks from either one or a record merged into it, searched back from the other's geometry no farther than the length of the edge.
 
     ## Args:
-    - ygs -- dictionary of YardGroup names to YardGroup objects
-    - ygs_graph -- YardGroup graph holding every hop as an edge
-    - hops -- pairs of YardGroups to grade, in either order
+    - yds -- dictionary of Yard names to Yard objects
+    - yds_graph -- Yard graph holding every hop as an edge
+    - hops -- pairs of Yards to grade, in either order
     - window_km -- track length a grade is measured over
     - merges, excluded_track_net_codes -- as for `track_graph`
 
     ## Returns:
-    - Dictionary of (YardGroup 1, YardGroup 2) to the grade travelling from 1 to 2, for both orders of every hop.
+    - Dictionary of (Yard 1, Yard 2) to the grade travelling from 1 to 2, for both orders of every hop.
     """
-    raw_ygs, raw_network = load_geojson()
-    nodes, adj, yg_at = track_graph(
-        ygs, raw_ygs, raw_network, merges, excluded_track_net_codes
+    raw_yds, raw_network = load_geojson()
+    nodes, adj, yd_at = track_graph(
+        yds, raw_yds, raw_network, merges, excluded_track_net_codes
     )
     trav_graph = nx.Graph(
         (u, v, {"weight": km}) for u, out in enumerate(adj) for v, km in out.items()
     )
-    yg_track: dict[YgKey, list[int]] = defaultdict(list)
-    for node, yg_key in enumerate(yg_at):
-        if yg_key is not None:
-            yg_track[yg_key].append(node)
+    yd_track: dict[YdKey, list[int]] = defaultdict(list)
+    for node, yd_key in enumerate(yd_at):
+        if yd_key is not None:
+            yd_track[yd_key].append(node)
     # A graph built before a merge has edges walked from the merged record (`merge_graph_nodes`).
-    starts: dict[YgKey, set[int]] = defaultdict(set)
-    for feat in raw_ygs:
-        name = YgKey.new(
+    starts: dict[YdKey, set[int]] = defaultdict(set)
+    for feat in raw_yds:
+        name = YdKey.new(
             str(feat.properties.get("YARDNAME")), str(feat.properties.get("OBJECTID"))
         )
-        coord = get_yg_coord(feat.geometry)
+        coord = get_yd_coord(feat.geometry)
         if (node := nodes.get((coord.lat, coord.lon))) is not None:
-            starts[_merged_name(name, ygs, merges or {})].add(node)
+            starts[_merged_name(name, yds, merges or {})].add(node)
 
-    paths: dict[tuple[YgKey, YgKey], list[int]] = {}
+    paths: dict[tuple[YdKey, YdKey], list[int]] = {}
     for a, b in track(hops, get_progress_desc_with_padding("Finding hop track...")):
         found: list[tuple[float, list[int]]] = []
         for src, dst in ((a, b), (b, a)):
             for start in starts[src]:
-                if not yg_track[dst]:
+                if not yd_track[dst]:
                     continue
                 try:
                     dist, path = nx.multi_source_dijkstra(
                         trav_graph,
-                        yg_track[dst],
+                        yd_track[dst],
                         target=start,
-                        cutoff=float(ygs_graph[a][b]["weight"]) * 1.001,
-                        # Like the walk, do not pass through another YardGroup. The walk starts at `start` even when it is on another YardGroup's track too.
+                        cutoff=float(yds_graph[a][b]["weight"]) * 1.001,
+                        # Like the walk, do not pass through another Yard. The walk starts at `start` even when it is on another Yard's track too.
                         weight=lambda _u, v, d, start=start, ends=(None, src, dst): (
-                            d["weight"] if v == start or yg_at[v] in ends else None
+                            d["weight"] if v == start or yd_at[v] in ends else None
                         ),
                     )
                 except nx.NetworkXNoPath:
@@ -539,7 +537,7 @@ def grade_hops(
     coords = [Coord(lat=coord_of[n][0], lon=coord_of[n][1]) for n in path_nodes]
     elevations = dict(zip(path_nodes, sample_elevations(coords)))
     rise_per_km = kilometers_to_meters(MAX_TRACK_GRADE_PERCENT / 100)
-    grades: dict[tuple[YgKey, YgKey], float] = {}
+    grades: dict[tuple[YdKey, YdKey], float] = {}
     for (a, b), path in paths.items():
         km = np.cumsum([0.0] + [adj[u][v] for u, v in pairwise(path)])
         elev = np.array([elevations[node] for node in path])
@@ -568,57 +566,57 @@ def grade_hops(
     return grades
 
 
-def _copy_yard_attributes(graph: Graph, ygs: dict[YgKey, YardGroup]) -> None:
-    """Copy each YardGroup's city, state and track length onto its node."""
-    for yg_name, yg in ygs.items():
-        if yg_name in graph.nodes:
-            graph.nodes[yg_name]["city"] = yg.city
-            graph.nodes[yg_name]["state"] = yg.state
-            graph.nodes[yg_name]["shape_length_km"] = yg.shape_length_km
+def _copy_yard_attributes(graph: Graph, yds: dict[YdKey, Yard]) -> None:
+    """Copy each Yard's city, state and track length onto its node."""
+    for yd_name, yd in yds.items():
+        if yd_name in graph.nodes:
+            graph.nodes[yd_name]["city"] = yd.city
+            graph.nodes[yd_name]["state"] = yd.state
+            graph.nodes[yd_name]["shape_length_km"] = yd.shape_length_km
 
 
 def build_or_load_graph(
-    ygs: dict[YgKey, YardGroup],
-    merges: dict[YgKey, YgKey] | None = None,
+    yds: dict[YdKey, Yard],
+    merges: dict[YdKey, YdKey] | None = None,
     excluded_track_net_codes: Collection[str] = (),
 ) -> Graph:
     """
-    Load the YardGroup graph from `GRAPH_FILE`, or, only when that file is missing, build it with `traverse_graph` (the walk) and save it.
+    Load the Yard graph from `GRAPH_FILE`, or, only when that file is missing, build it with `traverse_graph` (the walk) and save it.
 
     ## Args:
-    - ygs -- YardGroups by name
-    - merges -- merged YardGroup name -> the one it's merged into. Only used when building.
+    - yds -- Yards by name
+    - merges -- merged Yard name -> the one it's merged into. Only used when building.
     - excluded_track_net_codes -- `NET` codes the walk skips. Only used when building.
 
     ## Returns:
-    - Graph with a node per YardGroup and an edge (km) per connection.
+    - Graph with a node per Yard and an edge (km) per connection.
     """
     try:
         file_exists = (GRAPH_DIR / GRAPH_FILE).exists()
         if file_exists:
             graph = cast(Graph, nx.read_gexf(path=GRAPH_DIR / GRAPH_FILE))
-            print(f"{GRAPH_FILE} exists, skipping YardGroup Graph generation.")
-            _copy_yard_attributes(graph, ygs)
+            print(f"{GRAPH_FILE} exists, skipping Yard Graph generation.")
+            _copy_yard_attributes(graph, yds)
             return graph
     except (ValidationError, FileNotFoundError) as e:
         print(
             f"File missing or invalid {GRAPH_FILE} structure, regenerating graph. Error: {e}"
         )
-    raw_ygs, raw_network = load_geojson()
-    ygs = {name: yg for name, yg in ygs.items() if name not in (merges or {})}
+    raw_yds, raw_network = load_geojson()
+    yds = {name: yd for name, yd in yds.items() if name not in (merges or {})}
     graph = nx.Graph()
-    for yg_name, yg in ygs.items():
+    for yd_name, yd in yds.items():
         graph.add_node(
-            yg_name,
-            label=yg_name,
-            lat=yg.coord.lat,
-            lon=yg.coord.lon,
-            elevation=yg.elevation,
-            city=yg.city,
-            state=yg.state,
-            shape_length_km=yg.shape_length_km,
+            yd_name,
+            label=yd_name,
+            lat=yd.coord.lat,
+            lon=yd.coord.lon,
+            elevation=yd.elevation,
+            city=yd.city,
+            state=yd.state,
+            shape_length_km=yd.shape_length_km,
         )
-    edges = traverse_graph(ygs, raw_ygs, raw_network, merges, excluded_track_net_codes)
+    edges = traverse_graph(yds, raw_yds, raw_network, merges, excluded_track_net_codes)
     for a, b, d in edges:
         _ = graph.add_edge(a, b, weight=d)
     (GRAPH_DIR / EDGE_GRADES_FILE).unlink(missing_ok=True)
@@ -626,35 +624,35 @@ def build_or_load_graph(
     return graph
 
 
-def load_yard_group_changes() -> tuple[dict[YgKey, YgKey], set[YgKey], set[YgKey]]:
+def load_yard_changes() -> tuple[dict[YdKey, YdKey], set[YdKey], set[YdKey]]:
     """
-    Read the `apply = yes` rows of the yard group changes CSV.
+    Read the `apply = yes` rows of the yard changes CSV.
 
     ## Returns:
-    - merges: merged YardGroup name -> the one it's merged into
-    - drops: YardGroups to drop
-    - bars: YardGroups that stay but can't represent a FAF zone
+    - merges: merged Yard name -> the one it's merged into
+    - drops: Yards to drop
+    - bars: Yards that stay but can't represent a FAF zone
     """
-    with open(YG_CHANGES_PATH, newline="") as f:
+    with open(YD_CHANGES_PATH, newline="") as f:
         rows = [row for row in csv.DictReader(f) if row["apply"] == "yes"]
     merges = {
-        YgKey(row["yard_group"]): YgKey(row["merge_into"])
+        YdKey(row["yard"]): YdKey(row["merge_into"])
         for row in rows
         if row["action"] == "merge"
     }
-    drops = {YgKey(row["yard_group"]) for row in rows if row["action"] == "drop"}
-    bars = {YgKey(row["yard_group"]) for row in rows if row["action"] == "bar"}
+    drops = {YdKey(row["yard"]) for row in rows if row["action"] == "drop"}
+    bars = {YdKey(row["yard"]) for row in rows if row["action"] == "bar"}
     return merges, drops, bars
 
 
 def warn_unmatched_changes(
-    records: dict[YgKey, YardGroup],
-    merges: dict[YgKey, YgKey],
-    drops: set[YgKey],
-    bars: set[YgKey],
-) -> list[YgKey]:
+    records: dict[YdKey, Yard],
+    merges: dict[YdKey, YdKey],
+    drops: set[YdKey],
+    bars: set[YdKey],
+) -> list[YdKey]:
     """
-    Warn about yard groups named in the changes CSV that the yard records don't have.
+    Warn about yards named in the changes CSV that the yard records don't have.
 
     ## Returns:
     - The unmatched names, sorted.
@@ -663,49 +661,49 @@ def warn_unmatched_changes(
     missing = sorted(name for name in named if name not in records)
     if missing:
         print(
-            f"Warning: {len(missing):,} yard group(s) in {YARD_GROUP_CHANGES_FILE} are not in the NTAD yard records, "
+            f"Warning: {len(missing):,} yard(s) in {YARD_CHANGES_FILE} are not in the NTAD yard records, "
             f"so their rows are skipped (the record IDs may have changed): {', '.join(missing)}"
         )
     return missing
 
 
-def merge_yard_group_records(
-    ygs: dict[YgKey, YardGroup], merges: dict[YgKey, YgKey]
-) -> dict[YgKey, YardGroup]:
+def merge_yard_records(
+    yds: dict[YdKey, Yard], merges: dict[YdKey, YdKey]
+) -> dict[YdKey, Yard]:
     """
     Fold duplicate records of the same yard together. NTAD lists some yards more than once (crossing a county line, spelled two ways, ...).
 
-    The kept YardGroup gets the merged one's track length. Pairs where either side isn't in `ygs` are skipped.
+    The kept Yard gets the merged one's track length. Pairs where either side isn't in `yds` are skipped.
 
     ## Args:
-    - ygs -- YardGroups by name
-    - merges -- merged YardGroup name -> the one it's merged into
+    - yds -- Yards by name
+    - merges -- merged Yard name -> the one it's merged into
 
     ## Returns:
-    - `ygs` without the merged YardGroups.
+    - `yds` without the merged Yards.
     """
-    merged: set[YgKey] = set()
+    merged: set[YdKey] = set()
     for merged_name in merges:
         kept = _kept_name(merged_name, merges)
-        if merged_name not in ygs or kept not in ygs:
+        if merged_name not in yds or kept not in yds:
             continue
-        ygs[kept].shape_length_km += ygs[merged_name].shape_length_km
+        yds[kept].shape_length_km += yds[merged_name].shape_length_km
         merged.add(merged_name)
     print(
-        f"Merged {len(merged):,} of {len(ygs):,} YardGroups into another record of the same yard; {len(ygs) - len(merged):,} left."
+        f"Merged {len(merged):,} of {len(yds):,} Yards into another record of the same yard; {len(yds) - len(merged):,} left."
     )
-    return {name: yg for name, yg in ygs.items() if name not in merged}
+    return {name: yd for name, yd in yds.items() if name not in merged}
 
 
-def merge_graph_nodes(graph: Graph, merges: dict[YgKey, YgKey]) -> Graph:
+def merge_graph_nodes(graph: Graph, merges: dict[YdKey, YdKey]) -> Graph:
     """
-    Like `merge_yard_group_records`, but for the nodes of a graph built with every record as its own node. A graph built with the merges already applied comes out unchanged.
+    Like `merge_yard_records`, but for the nodes of a graph built with every record as its own node. A graph built with the merges already applied comes out unchanged.
 
-    The kept node takes over the merged node's edges, keeping the shorter one when both connect to the same YardGroup.
+    The kept node takes over the merged node's edges, keeping the shorter one when both connect to the same Yard.
 
     ## Args:
-    - graph -- YardGroup graph with `weight` (km) on every edge
-    - merges -- merged YardGroup name -> the one it's merged into
+    - graph -- Yard graph with `weight` (km) on every edge
+    - merges -- merged Yard name -> the one it's merged into
 
     ## Returns:
     - The same graph without the merged nodes.
@@ -729,10 +727,10 @@ def merge_graph_nodes(graph: Graph, merges: dict[YgKey, YgKey]) -> Graph:
 
 def drop_long_edges(graph: Graph, max_km: float) -> Graph:
     """
-    Drop connections longer than `max_km`. The yards file has US yards only, so a route through Canada or Mexico becomes one long connection with no yard group, and so no crew change, on the way.
+    Drop connections longer than `max_km`. The yards file has US yards only, so a route through Canada or Mexico becomes one long connection with no yard, and so no crew change, on the way.
 
     ## Args:
-    - graph -- YardGroup graph with `weight` (km) on every edge
+    - graph -- Yard graph with `weight` (km) on every edge
     - max_km -- longest connection kept
 
     ## Returns:
@@ -748,7 +746,7 @@ def drop_redundant_edges(
     graph: Graph, tolerance: float = SAME_TRACK_TOLERANCE
 ) -> Graph:
     """
-    Drop edges that skip over a YardGroup. The walk can give an edge A-C even when the track runs through B, and then a train on A-C passes B without B being on its path.
+    Drop edges that skip over a Yard. The walk can give an edge A-C even when the track runs through B, and then a train on A-C passes B without B being on its path.
 
     A-C goes when some B (connected to both) has:
     1. A-B + B-C < A-C, or
@@ -757,7 +755,7 @@ def drop_redundant_edges(
     Every edge is checked against the original graph before anything is removed. The `.gexf` file isn't touched.
 
     ## Args:
-    - graph -- YardGroup graph with `weight` (km) on every edge
+    - graph -- Yard graph with `weight` (km) on every edge
     - tolerance -- allowed extra length, as a fraction of A-C
 
     ## Returns:
@@ -766,8 +764,8 @@ def drop_redundant_edges(
     nodes = list(graph.nodes)
     index = {node: i for i, node in enumerate(nodes)}
     dist = np.full((len(nodes), len(nodes)), np.inf)
-    for yg_1, yg_2, weight in graph.edges(data="weight"):
-        dist[index[yg_1], index[yg_2]] = dist[index[yg_2], index[yg_1]] = float(weight)
+    for yd_1, yd_2, weight in graph.edges(data="weight"):
+        dist[index[yd_1], index[yd_2]] = dist[index[yd_2], index[yd_1]] = float(weight)
 
     shorter_joint: list[tuple[str, str]] = []
     same_track: list[tuple[str, str]] = []
@@ -793,19 +791,19 @@ def drop_redundant_edges(
     edges_before = graph.number_of_edges()
     graph.remove_edges_from(shorter_joint + same_track)
     print(
-        f"Dropped {len(shorter_joint):,} of {edges_before:,} edges with a shorter joint length through another YardGroup and {len(same_track):,} with a joint length less than {tolerance:.0%} longer; {graph.number_of_edges():,} edges left."
+        f"Dropped {len(shorter_joint):,} of {edges_before:,} edges with a shorter joint length through another Yard and {len(same_track):,} with a joint length less than {tolerance:.0%} longer; {graph.number_of_edges():,} edges left."
     )
     return graph
 
 
 def drop_bypassed_edges(graph: Graph, tolerance: float = SAME_TRACK_TOLERANCE) -> Graph:
     """
-    Drop edges that a path through other yard groups makes redundant: `drop_redundant_edges` catches the paths through 1 YardGroup; this catches the rest.
+    Drop edges that a path through other yards makes redundant: `drop_redundant_edges` catches the paths through 1 Yard; this catches the rest.
 
     Edges are checked longest first, each against the graph as it stands, and the graph stays as connected as before. Each check searches only up to the edge's own length times (1 + `tolerance`).
 
     ## Args:
-    - graph -- YardGroup graph with `weight` (km) on every edge
+    - graph -- Yard graph with `weight` (km) on every edge
     - tolerance -- allowed extra length, as a fraction of A-C
 
     ## Returns:
@@ -827,65 +825,65 @@ def drop_bypassed_edges(graph: Graph, tolerance: float = SAME_TRACK_TOLERANCE) -
         except nx.NetworkXNoPath:
             _ = graph.add_edge(a, b, **data)
     print(
-        f"Dropped {dropped:,} edges with a path through several YardGroups at most {tolerance:.0%} longer; {graph.number_of_edges():,} edges left."
+        f"Dropped {dropped:,} edges with a path through several Yards at most {tolerance:.0%} longer; {graph.number_of_edges():,} edges left."
     )
     return graph
 
 
-def _save_ygs(ygs: dict[YgKey, YardGroup], path: Path) -> None:
+def _save_yds(yds: dict[YdKey, Yard], path: Path) -> None:
     GRAPH_DIR.mkdir(exist_ok=True)
     with open(path, "w") as f:
         json.dump(
-            {key: value.model_dump(mode="json") for key, value in ygs.items()},
+            {key: value.model_dump(mode="json") for key, value in yds.items()},
             f,
             indent=4,
         )
 
 
-def _load_ygs_dict() -> dict[YgKey, YardGroup] | None:
-    """Saved YardGroup dict, or None if the file is missing or invalid."""
+def _load_yds_dict() -> dict[YdKey, Yard] | None:
+    """Saved Yard dict, or None if the file is missing or invalid."""
     try:
-        with open(GRAPH_DIR / YARD_GROUPS_DICT_FILE, "r") as f:
-            return ygs_dict_adapter.validate_python(json.load(f))
+        with open(GRAPH_DIR / YARDS_DICT_FILE, "r") as f:
+            return yds_dict_adapter.validate_python(json.load(f))
     except (ValidationError, FileNotFoundError) as e:
         print(
-            f"File missing or invalid {YARD_GROUPS_DICT_FILE} structure, regenerating dictionary. Error: {e}"
+            f"File missing or invalid {YARDS_DICT_FILE} structure, regenerating dictionary. Error: {e}"
         )
         return None
 
 
-def load_yard_records() -> dict[YgKey, YardGroup]:
+def load_yard_records() -> dict[YdKey, Yard]:
     """
-    Every NTAD yard record as a YardGroup with elevation and city. Read from `YARD_RECORDS_FILE`, or built from the geojson and saved.
+    Every NTAD yard record as a Yard with elevation and city. Read from `YARD_RECORDS_FILE`, or built from the geojson and saved.
 
     ## Returns:
-    - YardGroups by name, one per record. No FAF zones assigned yet.
+    - Yards by name, one per record. No FAF zones assigned yet.
     """
     try:
         with open(GRAPH_DIR / YARD_RECORDS_FILE, "r") as f:
-            records = ygs_dict_adapter.validate_python(json.load(f))
+            records = yds_dict_adapter.validate_python(json.load(f))
         print(f"{YARD_RECORDS_FILE} exists, skipping the elevation and city look-ups.")
         return records
     except (ValidationError, FileNotFoundError) as e:
         print(
             f"File missing or invalid {YARD_RECORDS_FILE} structure, building the yard records. Error: {e}"
         )
-    raw_ygs = load_yards_geojson()
-    yg_coords = [get_yg_coord(yg.geometry) for yg in raw_ygs]
-    elevations = sample_elevations(yg_coords)
-    city_states = concurrent_geocode(yg_coords)
-    records: dict[YgKey, YardGroup] = {}
-    for yg, elevation, (city, state) in track(
-        list(zip(raw_ygs, elevations, city_states)),
-        description=get_progress_desc_with_padding("Creating YardGroup Dictionary..."),
+    raw_yds = load_yards_geojson()
+    yd_coords = [get_yd_coord(yd.geometry) for yd in raw_yds]
+    elevations = sample_elevations(yd_coords)
+    city_states = concurrent_geocode(yd_coords)
+    records: dict[YdKey, Yard] = {}
+    for yd, elevation, (city, state) in track(
+        list(zip(raw_yds, elevations, city_states)),
+        description=get_progress_desc_with_padding("Creating Yard Dictionary..."),
     ):
-        id = str(yg.properties.get("OBJECTID"))
-        name = str(yg.properties.get("YARDNAME"))
-        owner = str(yg.properties.get("RROWNER1_NAME") or "")
-        geom = yg.geometry
-        coord = get_yg_coord(geom)
+        id = str(yd.properties.get("OBJECTID"))
+        name = str(yd.properties.get("YARDNAME"))
+        owner = str(yd.properties.get("RROWNER1_NAME") or "")
+        geom = yd.geometry
+        coord = get_yd_coord(geom)
         shape_length_km = _calc_shape_length_km(geom)
-        yg = YardGroup(
+        yd = Yard(
             id=id,
             name=name,
             owner=owner,
@@ -895,8 +893,8 @@ def load_yard_records() -> dict[YgKey, YardGroup]:
             state=state,
             shape_length_km=shape_length_km,
         )
-        records[yg.key()] = yg
-    _save_ygs(records, GRAPH_DIR / YARD_RECORDS_FILE)
+        records[yd.key()] = yd
+    _save_yds(records, GRAPH_DIR / YARD_RECORDS_FILE)
     return records
 
 
@@ -954,41 +952,39 @@ def _download_geojson(item_id: str, name: str, dest: Path) -> None:
     print(f"Download complete: {name}")
 
 
-def load_yards_geojson() -> list[YardGroupFeature]:
+def load_yards_geojson() -> list[YardFeature]:
     """
-    Opens and reads the raw geojson file of the YardGroups, downloading it when missing.
+    Opens and reads the raw geojson file of the Yards, downloading it when missing.
 
     ## Returns:
-    - The ["features"] field of the raw geojson US YardGroups.
+    - The ["features"] field of the raw geojson US Yards.
     """
-    gj_ygs = None
+    gj_yds = None
     try:
         PUBLIC_DIR.mkdir(exist_ok=True)
-        with open(PUBLIC_DIR / YARD_GROUPS_FILE, "r") as f:
-            gj_ygs = json.load(f)
+        with open(PUBLIC_DIR / YARDS_FILE, "r") as f:
+            gj_yds = json.load(f)
     except FileNotFoundError:
-        _download_geojson(
-            YARD_GROUPS_ITEM_ID, YARD_GROUPS_FILE, PUBLIC_DIR / YARD_GROUPS_FILE
-        )
-        with open(PUBLIC_DIR / YARD_GROUPS_FILE, "r") as f:
-            gj_ygs = json.load(f)
+        _download_geojson(YARDS_ITEM_ID, YARDS_FILE, PUBLIC_DIR / YARDS_FILE)
+        with open(PUBLIC_DIR / YARDS_FILE, "r") as f:
+            gj_yds = json.load(f)
 
     try:
-        if not gj_ygs:
+        if not gj_yds:
             raise ValueError("Invalid rail yard GeoJSON features")
-        return yg_adapter.validate_python(gj_ygs["features"])
+        return yd_adapter.validate_python(gj_yds["features"])
     except ValidationError as e:
         raise ValueError("Invalid rail yard GeoJSON features") from e
 
 
-def load_geojson() -> tuple[list[YardGroupFeature], list[RailNetworkFeature]]:
+def load_geojson() -> tuple[list[YardFeature], list[RailNetworkFeature]]:
     """
     Read the raw yard and rail network geojson, downloading them if missing.
 
     ## Returns:
     - The yard features and the rail network features.
     """
-    raw_ygs = load_yards_geojson()
+    raw_yds = load_yards_geojson()
 
     gj_network = None
     try:
@@ -1010,68 +1006,68 @@ def load_geojson() -> tuple[list[YardGroupFeature], list[RailNetworkFeature]]:
     except ValidationError as e:
         raise ValueError("Invalid rail network GeoJSON features") from e
 
-    return raw_ygs, raw_network
+    return raw_yds, raw_network
 
 
 def generate_or_load_network(
     cfg: Config | None = None,
-) -> tuple[dict[YgKey, YardGroup], Graph, OdAssignmentStats]:
+) -> tuple[dict[YdKey, Yard], Graph, OdAssignmentStats]:
     """
-    Entry point for the YardGroup dict (`.json`) and the YardGroup graph (`.gexf`). If both files exist they're loaded; otherwise the missing pieces get built:
-    1. YardGroups: the yard records (`load_yard_records`) with the changes CSV applied. Duplicates get merged, and drops are left out if the graph is being built too.
+    Entry point for the Yard dict (`.json`) and the Yard graph (`.gexf`). If both files exist they're loaded; otherwise the missing pieces get built:
+    1. Yards: the yard records (`load_yard_records`) with the changes CSV applied. Duplicates get merged, and drops are left out if the graph is being built too.
     2. Graph: loaded, or walked over the track in use.
-    3. FAF zone yard groups (`assign_od_yard_groups`), which need the graph distances.
+    3. FAF zone yards (`assign_od_yards`), which need the graph distances.
     4. Save the dict.
 
     ## Args:
     - cfg -- Config for the track in use and the zone settings. Defaults to the config file (`configs/schedule_config.yaml`).
 
     ## Returns:
-    - The YardGroup dict, the graph, and the FAF zone stats (recounted from the dict when it was loaded from file).
+    - The Yard dict, the graph, and the FAF zone stats (recounted from the dict when it was loaded from file).
     """
     cfg = cfg if cfg is not None else load_config()
     max_km = cfg.network_settings.max_connection_km
-    merges, drops, bars = load_yard_group_changes()
+    merges, drops, bars = load_yard_changes()
     graph_exists = (GRAPH_DIR / GRAPH_FILE).exists()
 
-    ygs_dict = _load_ygs_dict() if graph_exists else None
-    ygs_graph: Graph | None = None
-    if ygs_dict is not None:
-        ygs_graph = merge_graph_nodes(build_or_load_graph(ygs_dict), merges)
-        if set(ygs_dict) == set(ygs_graph.nodes):
+    yds_dict = _load_yds_dict() if graph_exists else None
+    yds_graph: Graph | None = None
+    if yds_dict is not None:
+        yds_graph = merge_graph_nodes(build_or_load_graph(yds_dict), merges)
+        if set(yds_dict) == set(yds_graph.nodes):
             return (
-                ygs_dict,
+                yds_dict,
                 drop_bypassed_edges(
-                    drop_redundant_edges(drop_long_edges(ygs_graph, max_km))
+                    drop_redundant_edges(drop_long_edges(yds_graph, max_km))
                 ),
-                od_assignment_stats(ygs_dict, cfg),
+                od_assignment_stats(yds_dict, cfg),
             )
         print(
-            f"{YARD_GROUPS_DICT_FILE} does not hold the YardGroups of {GRAPH_FILE}, regenerating dictionary."
+            f"{YARDS_DICT_FILE} does not hold the Yards of {GRAPH_FILE}, regenerating dictionary."
         )
 
     records = load_yard_records()
     warn_unmatched_changes(records, merges, drops, bars)
     if not graph_exists:
-        records = {name: yg for name, yg in records.items() if name not in drops}
-    ygs_dict = merge_yard_group_records(records, merges)
-    if ygs_graph is None:
-        ygs_graph = build_or_load_graph(
-            ygs_dict, merges, cfg.network_settings.excluded_track_net_codes
+        records = {name: yd for name, yd in records.items() if name not in drops}
+    yds_dict = merge_yard_records(records, merges)
+    if yds_graph is None:
+        yds_graph = build_or_load_graph(
+            yds_dict, merges, cfg.network_settings.excluded_track_net_codes
         )
-    else:  # graph.gexf was already read above; only the YardGroup attributes change
-        _copy_yard_attributes(ygs_graph, ygs_dict)
+    else:  # graph.gexf was already read above; only the Yard attributes change
+        _copy_yard_attributes(yds_graph, yds_dict)
     if not graph_exists:
-        parts = sorted(map(len, nx.connected_components(ygs_graph)), reverse=True)
+        parts = sorted(map(len, nx.connected_components(yds_graph)), reverse=True)
         print(
-            f"Generated {GRAPH_FILE}: {ygs_graph.number_of_nodes():,} YardGroups and {ygs_graph.number_of_edges():,} edges in {len(parts):,} connected part(s); YardGroups per part: {parts[:10]}."
+            f"Generated {GRAPH_FILE}: {yds_graph.number_of_nodes():,} Yards and {yds_graph.number_of_edges():,} edges in {len(parts):,} connected part(s); Yards per part: {parts[:10]}."
         )
 
-    ygs_graph = merge_graph_nodes(ygs_graph, merges)
-    ygs_dict = {name: yg for name, yg in ygs_dict.items() if name in ygs_graph}
-    ygs_graph = drop_bypassed_edges(
-        drop_redundant_edges(drop_long_edges(ygs_graph, max_km))
+    yds_graph = merge_graph_nodes(yds_graph, merges)
+    yds_dict = {name: yd for name, yd in yds_dict.items() if name in yds_graph}
+    yds_graph = drop_bypassed_edges(
+        drop_redundant_edges(drop_long_edges(yds_graph, max_km))
     )
-    od_assignment = assign_od_yard_groups(ygs_dict, ygs_graph, cfg, barred=drops | bars)
-    _save_ygs(ygs_dict, GRAPH_DIR / YARD_GROUPS_DICT_FILE)
-    return ygs_dict, ygs_graph, od_assignment
+    od_assignment = assign_od_yards(yds_dict, yds_graph, cfg, barred=drops | bars)
+    _save_yds(yds_dict, GRAPH_DIR / YARDS_DICT_FILE)
+    return yds_dict, yds_graph, od_assignment

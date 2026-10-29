@@ -28,12 +28,12 @@ FRIDGE generates a one-week train schedule on the US rail network. Freight flows
 **Output** (in `output/<timestamp>/`):
 
 - **`schedule.csv`**: one row per segment of every train (Step 4).
-- **`distance_matrix.csv`**: km and minutes between every pair of yard groups in the schedule.
+- **`distance_matrix.csv`**: km and minutes between every pair of yards in the schedule.
 - **`schedule-generation-config.yaml`**: the settings the run used.
 - **`schedule-generation-report.txt`**: freight kept and dropped, stops and transfers per category, locomotive balance.
 - **`schedule-generation-stats.json`**: the console statistics.
 - **`solution_<category>.json`**, **`stop_events_<category>.csv`**: each category's model solution, as solved, and the stops of its trains after the empty legs are cut (Step 3).
-- **`zone_yard_groups.csv`**: the yard groups that represent each FAF zone (1e); `hub_city` names the hub cities whose hub a yard group is (Routing Graph, phase 1).
+- **`zone_yards.csv`**: the yards that represent each FAF zone (1e); `hub_city` names the hub cities whose hub a yard is (Routing Graph, phase 1).
 
 ---
 
@@ -49,26 +49,26 @@ The seed sets only each train's running days and start time, from one generator 
 
 ## Step 1: Build the Rail Network
 
-`RailNetwork(config)` calls `generate_or_load_network`, which returns the yard groups (`ygs_dict`, keyed `YARDNAME-OBJECTID`) and an undirected graph of them (`ygs_graph`, edges in km). Cached in `rail_network/`:
+`RailNetwork(config)` calls `generate_or_load_network`, which returns the yards (`yds_dict`, keyed `YARDNAME-OBJECTID`) and an undirected graph of them (`yds_graph`, edges in km). Cached in `rail_network/`:
 
-| File                                           | Contents                                              |
-| ---------------------------------------------- | ----------------------------------------------------- |
-| `yard_records.json`                            | Every NTAD yard record with elevation and city (1a)   |
-| `graph.gexf`                                   | The yard group graph before pruning (1c)              |
-| `ygs_dict.json`                                | The yard groups and the FAF zone each represents (1e) |
-| `hub_coords.json`                              | Geocoded hub cities                                   |
-| `edge_grades.json`                             | Ruling grade of each routed hop (Step 3)              |
-| `all_distances_grade<g>_max<m>_window<w>.json` | Cached distances for `distance_matrix.csv` (Step 4)   |
+| File                                           | Contents                                            |
+| ---------------------------------------------- | --------------------------------------------------- |
+| `yard_records.json`                            | Every NTAD yard record with elevation and city (1a) |
+| `graph.gexf`                                   | The yard graph before pruning (1c)                  |
+| `yds_dict.json`                                | The yards and the FAF zone each represents (1e)     |
+| `hub_coords.json`                              | Geocoded hub cities                                 |
+| `edge_grades.json`                             | Ruling grade of each routed hop (Step 3)            |
+| `all_distances_grade<g>_max<m>_window<w>.json` | Cached distances for `distance_matrix.csv` (Step 4) |
 
-Missing files are rebuilt; existing ones are read. After changing the zone settings or merges, delete `ygs_dict.json`; after changing drops or the track in use, also delete `graph.gexf`; after any network change, delete the `all_distances_*.json` files and `edge_grades.json`.
+Missing files are rebuilt; existing ones are read. After changing the zone settings or merges, delete `yds_dict.json`; after changing drops or the track in use, also delete `graph.gexf`; after any network change, delete the `all_distances_*.json` files and `edge_grades.json`.
 
 ### 1a. Yard Records (`load_yard_records`)
 
-One `YardGroup` per record of the NTAD Rail Yards file (downloaded if missing), with its first coordinate, its elevation (Copernicus GLO-90 DEM), its city and state (BigDataCloud reverse geocoding; needs `BDC_KEY`), its owner, and its track length `shape_length_km`, which ranks yard groups by size.
+One `Yard` per record of the NTAD Rail Yards file (downloaded if missing), with its first coordinate, its elevation (Copernicus GLO-90 DEM), its city and state (BigDataCloud reverse geocoding; needs `BDC_KEY`), its owner, and its track length `shape_length_km`, which ranks yards by size.
 
-### 1b. Yard Group Changes (`yg_changes.csv`)
+### 1b. Yard Changes (`yd_changes.csv`)
 
-Hand fixes to the yard records in `src/railgen/rail_network_gen/yg_changes.csv`; only rows with `apply` = `yes` are used:
+Hand fixes to the yard records in `src/railgen/rail_network_gen/yd_changes.csv`; only rows with `apply` = `yes` are used:
 
 - **`merge`**: another record of the same yard; folded into `merge_into`, which gets both track lengths.
 - **`drop`**: not a freight yard (passenger or tourist); left out of the graph.
@@ -76,20 +76,20 @@ Hand fixes to the yard records in `src/railgen/rail_network_gen/yg_changes.csv`;
 
 ### 1c. Building the Graph (`build_or_load_graph`)
 
-A walk over the North American rail lines (`custom_dijkstra`) goes out from each yard group until it reaches another; each edge is the shortest track distance (km) between two directly connected yard groups. Lines with a `NET` code in `network_settings.excluded_track_net_codes` are skipped. A merged record's track belongs to its yard group; a dropped record's track is ordinary track.
+A walk over the North American rail lines (`custom_dijkstra`) goes out from each yard until it reaches another; each edge is the shortest track distance (km) between two directly connected yards. Lines with a `NET` code in `network_settings.excluded_track_net_codes` are skipped. A merged record's track belongs to its yard; a dropped record's track is ordinary track.
 
 ### 1d. Pruning (`drop_long_edges`, `drop_redundant_edges`, `drop_bypassed_edges`)
 
 Done on every load; `graph.gexf` keeps every edge.
 
-- **Long connections:** edges over `network_settings.max_connection_km`. The yards file is US-only, so a route through Canada or Mexico becomes one long edge with no yard group, and so no crew change, on it.
-- **Edges that skip a yard group:** edge A–C goes when some path A–…–C is shorter, or at most `SAME_TRACK_TOLERANCE` (`constants.py`) longer, so a train on A–C does not pass yard groups that are not on its path. Paths through one yard group are checked first, then paths through any number (longest edges first, keeping the graph connected).
+- **Long connections:** edges over `network_settings.max_connection_km`. The yards file is US-only, so a route through Canada or Mexico becomes one long edge with no yard, and so no crew change, on it.
+- **Edges that skip a yard:** edge A–C goes when some path A–…–C is shorter, or at most `SAME_TRACK_TOLERANCE` (`constants.py`) longer, so a train on A–C does not pass yards that are not on its path. Paths through one yard are checked first, then paths through any number (longest edges first, keeping the graph connected).
 
-### 1e. FAF Zone Yard Groups (`assign_od_yard_groups`)
+### 1e. FAF Zone Yards (`assign_od_yards`)
 
-Every yard group lies in the FAF6 zone whose boundary contains it (`input_data/FAF6/`, the 2022 CFS geography shapefile; downloaded if missing). A yard group outside every zone but within `FAF_ZONE_TOLERANCE_KM` (`constants.py`) of one belongs to it: a yard's first track point can sit just over a zone boundary, as at El Paso on the Mexican border.
+Every yard lies in the FAF6 zone whose boundary contains it (`input_data/FAF6/`, the 2022 CFS geography shapefile; downloaded if missing). A yard outside every zone but within `FAF_ZONE_TOLERANCE_KM` (`constants.py`) of one belongs to it: a yard's first track point can sit just over a zone boundary, as at El Paso on the Mexican border.
 
-Each zone that sends or receives rail or multimodal freight (`input_data/FAF6.0.csv`) is represented by up to `network_settings.ygs_per_zone` of its yard groups, largest first; freight of the zone starts and ends at them. Barred yard groups (1b) are skipped, as are candidates within `min_od_yg_spacing_km` of track of one already chosen and candidates under `min_od_yg_track_km` of track (waived when a zone has none that large). A zone with no yard group inside is not represented, and its freight is dropped.
+Each zone that sends or receives rail or multimodal freight (`input_data/FAF6.0.csv`) is represented by up to `network_settings.yds_per_zone` of its yards, largest first; freight of the zone starts and ends at them. Barred yards (1b) are skipped, as are candidates within `min_od_yd_spacing_km` of track of one already chosen and candidates under `min_od_yd_track_km` of track (waived when a zone has none that large). A zone with no yard inside is not represented, and its freight is dropped.
 
 ---
 
@@ -99,7 +99,7 @@ Each zone that sends or receives rail or multimodal freight (`input_data/FAF6.0.
 
 ### 2a. Freight Flows (`build_commodities` in `demand.py`)
 
-A _commodity_ is the freight of one train type from an origin to a destination yard group, in tons per week: one freight group, or with `shared_bulk` all B groups together (as manifest freight of many SCTG codes is one commodity).
+A _commodity_ is the freight of one train type from an origin to a destination yard, in tons per week: one freight group, or with `shared_bulk` all B groups together (as manifest freight of many SCTG codes is one commodity).
 
 1. **Read FAF rows** with mode rail or multiple modes, every trade type (domestic part of imports and exports): 2022 tons × 1000 / 52. A multiple-modes row counts `multimodal_rail_share` of its tons, and only on zone pairs whose multiple-modes freight averages between `multimodal_min_miles` and `multimodal_max_miles` (FAF5 ton-miles / tons). Rows of `excluded_zones` are dropped.
 2. **Freight group and train type:** multiple-modes rows are `intermodal`; rail rows map their SCTG code through `freight_groups`, unlisted codes being `manifest`. `train_type_category` gives each group's category. With `shared_bulk` the B groups are summed into one `bulk` flow per zone pair; without it each keeps its own.
@@ -116,7 +116,7 @@ The run report lists the tons kept and dropped at each step.
 
 Routes concentrate on main corridors instead of each yard pair taking its own shortest path:
 
-1. **Phase 1:** shortest paths (travel time at `train_settings.speed_km_h`, slower uphill) between every pair of hubs. A hub is the largest zone yard group within `network_settings.hub_radius_km` of a `hub_locations` city, in its state. Connections at a zone yard group cost `od_discount_factor` × their time.
+1. **Phase 1:** shortest paths (travel time at `train_settings.speed_km_h`, slower uphill) between every pair of hubs. A hub is the largest zone yard within `network_settings.hub_radius_km` of a `hub_locations` city, in its state. Connections at a zone yard cost `od_discount_factor` × their time.
 2. **Phase 2:** each connection's time is discounted by how many phase-1 paths use it, n:
 
    ```
@@ -131,17 +131,17 @@ One speed is used for every category: it scales all costs alike and does not cha
 
 ### Regions: full, East or West (`regions.py`)
 
-`region.instance` (or `--region`) selects the whole network or one side. A yard group is West if its state is in `region.west_states`, else East; yard groups within `gateway_radius_km` of a gateway zone's yard group (Chicago, St. Louis, Kansas City, Memphis, New Orleans) are in both. Flows are routed on the full network, then a region keeps:
+`region.instance` (or `--region`) selects the whole network or one side. A yard is West if its state is in `region.west_states`, else East; yards within `gateway_radius_km` of a gateway zone's yard (Chicago, St. Louis, Kansas City, Memphis, New Orleans) are in both. Flows are routed on the full network, then a region keeps:
 
 - flows with both ends on its side, or a gateway end and the other end on its side: whole;
 - gateway-to-gateway flows: whole, in the region with most of their route;
-- flows between the sides: the part of the route on its side, cut where it first reaches the other side (at the near edge of a gateway area); a part of a single yard group is not kept, and the flow goes whole to the other region.
+- flows between the sides: the part of the route on its side, cut where it first reaches the other side (at the near edge of a gateway area); a part of a single yard is not kept, and the flow goes whole to the other region.
 
 Each region saves its own solutions (`solution_<category>_east.json`, `..._west.json`).
 
 ### 2b. Candidate Trains (`candidates.py`)
 
-One candidate per kept yard pair and train type. Its path is the yard pair's route; its potential stops are the ends and every _allowed_ yard on the way (the zone yard groups plus the `work_yards_per_state` largest yard groups per state); its legs run between consecutive potential stops.
+One candidate per kept yard pair and train type. Its path is the yard pair's route; its potential stops are the ends and every _allowed_ yard on the way (the zone yards plus the `work_yards_per_state` largest yards per state); its legs run between consecutive potential stops.
 
 A leg's capacity is the freight one run may carry: `max_trailing_tons_per_run_by_category` / (1 + empty car tons / cargo tons per car). E.g. 13,000 trailing tons with 33-t cars carrying 90 t hold 9,512 t of freight.
 
@@ -183,9 +183,9 @@ Each yard's weekly set-outs minus pick-ups must equal its FAF inbound minus outb
 
 - **Empty legs cut** (`cut_empty_legs`): a candidate runs its yard pair's whole route, so legs can carry nothing. Each train starts at its first pick-up and ends at its last set-out, and a train with an empty leg in the middle is split there into separate trains (services `<id>-1`, `<id>-2`, ...) with the same runs. No freight crosses an empty leg, so the flows are unchanged; the pieces are the shorter services a larger candidate set would offer (Zhu et al., 2014). The report gives the legs and train-km cut and the trains added.
 - **Symbols:** a train with `y_s` runs per week becomes symbols of at most `max_runs_per_week` runs (10 runs: a daily symbol and a 3-day symbol), named `<category>TRN_<n>`, with random running days. Each run carries 1 / `y_s` of the weekly flows.
-- **Stops:** the ends, the work stops (pick-ups or set-outs in the solution) and crew changes. Walking the route, a crew changes at the last yard group before its duty would pass `crew.duty_hours` − `crew.terminal_hours`. If the train worked at a stop at most `crew.merge_with_work_stop_minutes` of running earlier, the change moves back to that stop (when the new crew can still run the next stretch), so no crew-only stop follows right after a work stop.
-- **Long stretches:** a stretch between two yard groups longer than one crew's duty is reported as a warning (e.g. Hutchinson, KS to Santa Rosa, NM, about 19 h for a bulk train). NTAD lists yards, not the depots or sidings where crews change on the main line.
-- **Times:** each symbol starts at a random minute of the week and runs at its category's `train_settings.speed_km_h_by_category`, slower uphill (`per_grade_speed_reduction` per 1% of grade, up to `max_speed_reduction`). This grade is a hop's rise between its two yard groups' elevations over its length; hops shorter than `grade_window_km` count as level. At an intermediate stop it dwells by what happens there (`dwell_minutes`, in minutes):
+- **Stops:** the ends, the work stops (pick-ups or set-outs in the solution) and crew changes. Walking the route, a crew changes at the last yard before its duty would pass `crew.duty_hours` − `crew.terminal_hours`. If the train worked at a stop at most `crew.merge_with_work_stop_minutes` of running earlier, the change moves back to that stop (when the new crew can still run the next stretch), so no crew-only stop follows right after a work stop.
+- **Long stretches:** a stretch between two yards longer than one crew's duty is reported as a warning (e.g. Hutchinson, KS to Santa Rosa, NM, about 19 h for a bulk train). NTAD lists yards, not the depots or sidings where crews change on the main line.
+- **Times:** each symbol starts at a random minute of the week and runs at its category's `train_settings.speed_km_h_by_category`, slower uphill (`per_grade_speed_reduction` per 1% of grade, up to `max_speed_reduction`). This grade is a hop's rise between its two yards' elevations over its length; hops shorter than `grade_window_km` count as level. At an intermediate stop it dwells by what happens there (`dwell_minutes`, in minutes):
 
   | Crew change | Set-out | Pick-up | Pick-up + set-out | Set-out + crew | Pick-up + crew | All three |
   | ----------- | ------- | ------- | ----------------- | -------------- | -------------- | --------- |
@@ -202,11 +202,11 @@ Each yard's weekly set-outs minus pick-ups must equal its FAF inbound minus outb
   locomotives   = ceil(hp_per_ton × trailing_tons / locomotive_hp)
   ```
 
-  The grade is the segment's ruling grade: the steepest grade of its hops in its direction of travel (`RailNetwork.get_ruling_grade`). A hop's grade, from one yard group to the next, is its steepest rise over `grade_window_km` (default 10) of its track; a hop shorter than that has no grade (`RailNetwork.load_ruling_grades`, `grade_hops`). Each hop's track is sampled from the Copernicus GLO-90 DEM, with tunnels and bridges interpolated out (`MAX_TRACK_GRADE_PERCENT`, `TRACK_OFF_GROUND_M`). Grades are cached in `rail_network/edge_grades.json` until the graph is rebuilt or the grade settings change. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
+  The grade is the segment's ruling grade: the steepest grade of its hops in its direction of travel (`RailNetwork.get_ruling_grade`). A hop's grade, from one yard to the next, is its steepest rise over `grade_window_km` (default 10) of its track; a hop shorter than that has no grade (`RailNetwork.load_ruling_grades`, `grade_hops`). Each hop's track is sampled from the Copernicus GLO-90 DEM, with tunnels and bridges interpolated out (`MAX_TRACK_GRADE_PERCENT`, `TRACK_OFF_GROUND_M`). Grades are cached in `rail_network/edge_grades.json` until the graph is rebuilt or the grade settings change. 20 lb per ton per 1% of grade is 1% of a 2,000-lb ton; 1 hp is 375 lb of pull at 1 mph.
 
 ### 3b. Circuitous Trains (`circuitous_trains.py`)
 
-A yard group's locomotive balance is the locomotives arriving minus leaving in a week. Freight mostly moves one way, so some yard groups gather locomotives and others run short. Some trains can come straight back to their origin as the same symbol, with their empty cars (shown as the legs' tonnage) and the locomotives of their heaviest leg. The loads are set out at the turn; crews change as in Step 3, counting the duty the incoming crew has worked, and a change just past the turn merges into it:
+A yard's locomotive balance is the locomotives arriving minus leaving in a week. Freight mostly moves one way, so some yards gather locomotives and others run short. Some trains can come straight back to their origin as the same symbol, with their empty cars (shown as the legs' tonnage) and the locomotives of their heaviest leg. The loads are set out at the turn; crews change as in Step 3, counting the duty the incoming crew has worked, and a change just past the turn merges into it:
 
 - `short_empty_returns`, `long_empty_returns`: per category, the share of its short (at most `short_max_miles`) and long trains that may come back.
 - Returns are chosen one at a time, each the one that most reduces the locomotives to reposition; a return that does not help, or does not fit in the week, is not added.
@@ -221,9 +221,9 @@ The report gives the balance before and after.
 
 | Columns                                        | Meaning                                                                     |
 | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| `ROW_ID`                                       | `<TRN_SYMB>_<BGN_YG>_<END_YG>`, the row key in scenario output              |
+| `ROW_ID`                                       | `<TRN_SYMB>_<BGN_YD>_<END_YD>`, the row key in scenario output              |
 | `TRN_CATG`, `TRN_SYMB`                         | Category and symbol                                                         |
-| `BGN_YG`, `END_YG`                             | Yard groups where the segment begins and ends                               |
+| `BGN_YD`, `END_YD`                             | Yards where the segment begins and ends                                     |
 | `MON_TON` … `SUN_TON`                          | Tons of freight each day (on a circuitous train's way back: its empty cars) |
 | `IS_PU`, `IS_SO`, `IS_CG`                      | Pick-up at the beginning, set-out at the end, crew change at either end     |
 | `PU_TON`, `SO_TON`                             | Tons picked up per run at the beginning, set out per run at the end         |
@@ -231,13 +231,13 @@ The report gives the balance before and after.
 | `RUNS_MON` … `RUNS_SUN`                        | 1 on the days the symbol runs                                               |
 | `DEP_DAY`, `DEP_TIME`, `ARVL_DAY`, `ARVL_TIME` | Departure and arrival; days count from the trip's start (1 = first day)     |
 
-`distance_matrix.csv` (unless `--skip-distances`): the shortest route (km) and its minutes at `train_settings.speed_km_h`, with the slowdown on grades, for every pair of yard groups in the schedule. Distances are cached in `rail_network/all_distances_grade<g>_max<m>_window<w>.json`, stored at 100 km/h and rescaled, so a speed change needs no new cache.
+`distance_matrix.csv` (unless `--skip-distances`): the shortest route (km) and its minutes at `train_settings.speed_km_h`, with the slowdown on grades, for every pair of yards in the schedule. Distances are cached in `rail_network/all_distances_grade<g>_max<m>_window<w>.json`, stored at 100 km/h and rescaled, so a speed change needs no new cache.
 
 ---
 
 ## Step 5: Write Statistics
 
-`schedule-generation-stats.json`: the seed, how FAF zones were mapped onto yard groups, the output counts and the per-category breakdown.
+`schedule-generation-stats.json`: the seed, how FAF zones were mapped onto yards, the output counts and the per-category breakdown.
 
 ---
 

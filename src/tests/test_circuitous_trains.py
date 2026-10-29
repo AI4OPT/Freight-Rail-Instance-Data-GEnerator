@@ -7,7 +7,7 @@ import networkx as nx
 import pytest
 from pydantic import ValidationError
 
-from railgen.models import DayOfWeek, YgKey
+from railgen.models import DayOfWeek, YdKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import TrainSymbol
 from railgen.schedule_gen.candidates import CandidateService
@@ -25,7 +25,7 @@ from railgen.schedule_gen.schedule_config import (
 )
 from railgen.schedule_gen.solution_to_trains import return_trip, to_trains
 
-A, B, C, D = YgKey("A-1"), YgKey("B-2"), YgKey("C-3"), YgKey("D-4")
+A, B, C, D = YdKey("A-1"), YdKey("B-2"), YdKey("C-3"), YdKey("D-4")
 
 
 def _coal_train(
@@ -42,11 +42,11 @@ def _coal_train(
         }
     )
     network.train_speed_km_h = speed_km_h
-    network.ygs_graph = nx.Graph()
+    network.yds_graph = nx.Graph()
     for (u, v), km in zip([(A, B), (B, C), (C, D)], hops_km, strict=True):
-        network.ygs_graph.add_edge(u, v, weight=km)
-    network.ruling_grades = dict.fromkeys(network.ygs_graph.to_directed().edges, 0.0)
-    network.ygs_dict = {y: SimpleNamespace(elevation=0.0) for y in (A, B, C, D)}  # ty: ignore[invalid-assignment]
+        network.yds_graph.add_edge(u, v, weight=km)
+    network.ruling_grades = dict.fromkeys(network.yds_graph.to_directed().edges, 0.0)
+    network.yds_dict = {y: SimpleNamespace(elevation=0.0) for y in (A, B, C, D)}  # ty: ignore[invalid-assignment]
     service = CandidateService(
         id="S0",
         train_type="coal",
@@ -80,24 +80,24 @@ def test_return_trip_brings_the_empty_cars_and_locomotives_back():
     longer = return_trip(train, service, network, settings)
     assert longer is not None and longer.symbol == train.symbol
     out, back = longer.route
-    assert (out.bgn_yg, out.end_yg, back.bgn_yg, back.end_yg) == (A, D, D, A)
+    assert (out.bgn_yd, out.end_yd, back.bgn_yd, back.end_yd) == (A, D, D, A)
     day = next(d for d in DayOfWeek if train.days_active.get_day(d))
     # 10,000 t of coal in cars carrying 100 t -> 100 empty cars of 29 t.
     assert back.tonnage_by_day.get_day(day) == pytest.approx(2_900.0)
     assert back.req_counts_by_day == out.req_counts_by_day  # same locomotives come back
-    assert out.bgn_yg_reason.pu_amount == pytest.approx(
+    assert out.bgn_yd_reason.pu_amount == pytest.approx(
         10_000.0
     )  # PU_TON of the first leg
-    assert back.end_yg_reason.so_amount == pytest.approx(
+    assert back.end_yd_reason.so_amount == pytest.approx(
         2_900.0
     )  # the empty cars, set out at A
-    assert not back.bgn_yg_reason.pick_up and back.end_yg_reason.set_out
+    assert not back.bgn_yd_reason.pick_up and back.end_yd_reason.set_out
     # Leaves after the set-out dwell (30 min); one crew for 4.5 + 0.5 + 4.5 h.
     start = _minutes(1, out.dep_time)
     arrive = _minutes(out.arvl_day, out.arvl_time) - start
     leave = _minutes(back.dep_day, back.dep_time) - start
     assert leave - arrive == 30
-    assert not back.bgn_yg_reason.crew_change and not out.end_yg_reason.crew_change
+    assert not back.bgn_yd_reason.crew_change and not out.end_yd_reason.crew_change
 
 
 def test_return_trip_changes_crew_at_the_turn_when_the_shift_is_used_up():
@@ -105,7 +105,7 @@ def test_return_trip_changes_crew_at_the_turn_when_the_shift_is_used_up():
     longer = return_trip(train, service, network, settings)
     assert longer is not None
     out, *back = longer.route
-    assert out.end_yg_reason.crew_change and back[0].bgn_yg_reason.crew_change
+    assert out.end_yd_reason.crew_change and back[0].bgn_yd_reason.crew_change
 
 
 def test_return_trip_crew_change_just_past_the_turn_moves_back_to_the_turn():
@@ -115,8 +115,8 @@ def test_return_trip_crew_change_just_past_the_turn_moves_back_to_the_turn():
     longer = return_trip(train, service, network, settings)
     assert longer is not None
     out, *back = longer.route
-    assert out.end_yg_reason.crew_change and back[0].bgn_yg_reason.crew_change
-    assert not any(leg.end_yg_reason.crew_change for leg in back)
+    assert out.end_yd_reason.crew_change and back[0].bgn_yd_reason.crew_change
+    assert not any(leg.end_yd_reason.crew_change for leg in back)
 
 
 def test_return_trip_that_does_not_fit_in_a_week_is_not_made():
@@ -136,7 +136,7 @@ def test_return_trip_cancels_the_train_s_imbalance():
 
 
 def test_returns_are_picked_where_they_help_most_and_never_when_they_hurt():
-    x, y = YgKey("X-1"), YgKey("Y-2")
+    x, y = YdKey("X-1"), YdKey("Y-2")
     net = {x: 5, y: -5}
     s1, s2, s3 = TrainSymbol("BTRN_1"), TrainSymbol("BTRN_2"), TrainSymbol("BTRN_3")
     candidates = {

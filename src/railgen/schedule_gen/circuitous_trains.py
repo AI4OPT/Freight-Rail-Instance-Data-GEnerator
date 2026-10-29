@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Hashable, Mapping
 
-from railgen.models import DayOfWeek, YgKey
+from railgen.models import DayOfWeek, YdKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import RouteSegment, Train, TrainSymbol
 from railgen.schedule_gen.candidates import CandidateService
@@ -12,7 +12,7 @@ from railgen.schedule_gen.solution_to_trains import return_trip
 NEAR_BALANCE_SHARES = (
     0.10,
     0.25,
-)  # reported: yard groups within these shares of their traffic
+)  # reported: yards within these shares of their traffic
 
 
 def leg_all_days_loc_count(leg: RouteSegment) -> int:
@@ -20,20 +20,20 @@ def leg_all_days_loc_count(leg: RouteSegment) -> int:
     return sum(leg.req_counts_by_day.get_day(day) for day in DayOfWeek)
 
 
-def yard_traffic(trains: list[Train]) -> tuple[dict[YgKey, int], dict[YgKey, int]]:
-    """Locomotives arriving at and departing from each yard group in a week."""
-    arrivals: dict[YgKey, int] = defaultdict(int)
-    departures: dict[YgKey, int] = defaultdict(int)
+def yard_traffic(trains: list[Train]) -> tuple[dict[YdKey, int], dict[YdKey, int]]:
+    """Locomotives arriving at and departing from each yard in a week."""
+    arrivals: dict[YdKey, int] = defaultdict(int)
+    departures: dict[YdKey, int] = defaultdict(int)
     for train in trains:
         for leg in train.route:
             n = leg_all_days_loc_count(leg)
-            arrivals[leg.end_yg] += n
-            departures[leg.bgn_yg] += n
+            arrivals[leg.end_yd] += n
+            departures[leg.bgn_yd] += n
     return dict(arrivals), dict(departures)
 
 
-def net_balance(trains: list[Train]) -> dict[YgKey, int]:
-    """Arrivals minus departures of locomotives per yard group in a week."""
+def net_balance(trains: list[Train]) -> dict[YdKey, int]:
+    """Arrivals minus departures of locomotives per yard in a week."""
     arrivals, departures = yard_traffic(trains)
     return {
         y: arrivals.get(y, 0) - departures.get(y, 0)
@@ -41,21 +41,21 @@ def net_balance(trains: list[Train]) -> dict[YgKey, int]:
     }
 
 
-def to_reposition(net: dict[YgKey, int]) -> int:
-    """Locomotives to reposition (move without a train that needs them) to balance every yard group."""
+def to_reposition(net: dict[YdKey, int]) -> int:
+    """Locomotives to reposition (move without a train that needs them) to balance every yard."""
     return sum(v for v in net.values() if v > 0)
 
 
-def terminals(trains: list[Train]) -> set[YgKey]:
-    """Yard groups where some train starts or ends."""
-    return {t.route[0].bgn_yg for t in trains} | {t.route[-1].end_yg for t in trains}
+def terminals(trains: list[Train]) -> set[YdKey]:
+    """Yards where some train starts or ends."""
+    return {t.route[0].bgn_yd for t in trains} | {t.route[-1].end_yd for t in trains}
 
 
-def balance_lines(trains: list[Train], ends: set[YgKey]) -> list[str]:
+def balance_lines(trains: list[Train], ends: set[YdKey]) -> list[str]:
     """Summary of the locomotive balance, for the run log and the report.
 
-    `ends` are the yard groups where trains start or end, taken before any circuitous train
-    is added, so that the lines before and after count the same yard groups.
+    `ends` are the yards where trains start or end, taken before any circuitous train
+    is added, so that the lines before and after count the same yards.
     """
     arrivals, departures = yard_traffic(trains)
     net = net_balance(trains)
@@ -67,29 +67,29 @@ def balance_lines(trains: list[Train], ends: set[YgKey]) -> list[str]:
     return [
         (
             f"locomotive movements on legs: {sum(arrivals.values()):,} a week; "
-            f"to reposition to balance every yard group: {to_reposition(net):,}"
+            f"to reposition to balance every yard: {to_reposition(net):,}"
         ),
         (
-            f"yard groups where trains start or end: {len(ends)}; balanced "
+            f"yards where trains start or end: {len(ends)}; balanced "
             f"{sum(net[y] == 0 for y in ends)}, {near}, one-way "
             f"{sum(v >= 1.0 for v in share.values())}"
         ),
     ]
 
 
-def leg_balance(legs: list[RouteSegment]) -> dict[YgKey, int]:
-    """Arrivals minus departures of locomotives that these legs cause, per yard group."""
-    net: dict[YgKey, int] = defaultdict(int)
+def leg_balance(legs: list[RouteSegment]) -> dict[YdKey, int]:
+    """Arrivals minus departures of locomotives that these legs cause, per yard."""
+    net: dict[YdKey, int] = defaultdict(int)
     for leg in legs:
         n = leg_all_days_loc_count(leg)
-        net[leg.end_yg] += n
-        net[leg.bgn_yg] -= n
+        net[leg.end_yd] += n
+        net[leg.bgn_yd] -= n
     return dict(net)
 
 
 def pick_helpful[G: Hashable](
-    net: dict[YgKey, int],
-    candidates: dict[TrainSymbol, dict[YgKey, int]],
+    net: dict[YdKey, int],
+    candidates: dict[TrainSymbol, dict[YdKey, int]],
     group_of: Mapping[TrainSymbol, G],
     budget: Mapping[G, int],
 ) -> list[TrainSymbol]:
@@ -97,7 +97,7 @@ def pick_helpful[G: Hashable](
     reposition (`net` updated as they are chosen), within the budget of each candidate's group
     (e.g. its category). Stops when no candidate left would reduce them."""
 
-    def gain(delta: dict[YgKey, int]) -> int:
+    def gain(delta: dict[YdKey, int]) -> int:
         return sum(
             max(net.get(y, 0), 0) - max(net.get(y, 0) + d, 0) for y, d in delta.items()
         )

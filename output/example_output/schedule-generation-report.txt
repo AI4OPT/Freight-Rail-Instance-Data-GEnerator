@@ -7,8 +7,8 @@ intra-zone under 25 mi (FAF5 distance), dropped: 2,296 FAF rows, 1,401,114 t/wee
 intra-zone with no FAF5 distance, kept: 406,552 t/week
 multimodal on zone pairs under 500 mi (FAF5 distance) or with no FAF5 distance, dropped: 98,010 FAF rows, 6,781,033 t/week (14.80% of all tons)
 multimodal on zone pairs over 2500 mi (FAF5 distance), dropped: 74,174 FAF rows, 347,337 t/week (0.76% of all tons)
-intra-zone in zones with a single yard group, dropped: 4,482 t/week
-zone pairs with no yard pair (a zone has no yard group), dropped: 41,000 t/week
+intra-zone in zones with a single yard, dropped: 4,482 t/week
+zone pairs with no yard pair (a zone has no yard), dropped: 41,000 t/week
 inter-zone, every yard pair under 40 km (local trains), dropped: 25,447 t/week
 category A: 4,952 of 4,973 zone pairs below 3000 t/week, dropped (259,058 of 413,317 t/week, 62.68% of the category's tons)
 category M: 9,894 of 10,025 zone pairs below 15000 t/week, dropped (6,845,349 of 12,819,538 t/week, 53.40% of the category's tons)
@@ -32,7 +32,7 @@ set-out tons per run, destination: n 15, min 553, median 1,746, mean 1,584, max 
 transfers (a commodity changes trains at a yard): 3; commodities with at least one: 3 of 19
 transfers per commodity: mean 0.16, max 1; distribution {0: 16, 1: 3}
 tons transferred: 29,015 t/week (0.21 x demand)
-4 train symbols have 4 stretches longer than a crew's 12 usable hours between two yard groups, so no crew change can split them: ATRN_12 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_15 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_13 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h; ATRN_17 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h
+4 train symbols have 4 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: ATRN_12 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_15 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_13 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h; ATRN_17 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h
 
 Category B
 empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
@@ -46,7 +46,7 @@ set-out tons per run, destination: n 145, min 1,970, median 11,451, mean 10,933,
 transfers (a commodity changes trains at a yard): 5; commodities with at least one: 5 of 182
 transfers per commodity: mean 0.03, max 1; distribution {0: 177, 1: 5}
 tons transferred: 182,036 t/week (0.01 x demand)
-8 train symbols have 10 stretches longer than a crew's 12 usable hours between two yard groups, so no crew change can split them: BTRN_171 HUTCHINSON-245 -> SANTA ROSA-2358 19.3 h; BTRN_185 HUTCHINSON-245 -> SANTA ROSA-2358 19.3 h; BTRN_30 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_31 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_32 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_140 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_141 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_167 WISHRAM-416 -> KLAMATH FALLS YARD-2211 12.7 h; BTRN_171 WINSLOW YARD-415 -> NEEDLES YARD-303 12.7 h; BTRN_185 WINSLOW YARD-415 -> NEEDLES YARD-303 12.7 h
+8 train symbols have 10 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: BTRN_171 HUTCHINSON-245 -> SANTA ROSA-2358 19.3 h; BTRN_185 HUTCHINSON-245 -> SANTA ROSA-2358 19.3 h; BTRN_30 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_31 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_32 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_140 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_141 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_167 WISHRAM-416 -> KLAMATH FALLS YARD-2211 12.7 h; BTRN_171 WINSLOW YARD-415 -> NEEDLES YARD-303 12.7 h; BTRN_185 WINSLOW YARD-415 -> NEEDLES YARD-303 12.7 h
 
 Category I
 empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
@@ -60,7 +60,7 @@ set-out tons per run, destination: n 46, min 2,875, median 5,579, mean 5,603, ma
 transfers (a commodity changes trains at a yard): 11; commodities with at least one: 5 of 55
 transfers per commodity: mean 0.20, max 6; distribution {0: 50, 1: 3, 2: 1, 6: 1}
 tons transferred: 75,349 t/week (0.08 x demand)
-2 train symbols have 2 stretches longer than a crew's 12 usable hours between two yard groups, so no crew change can split them: ITRN_21 HUTCHINSON-245 -> SANTA ROSA-2358 14.7 h; ITRN_28 SANTA ROSA-2358 -> HUTCHINSON-245 14.5 h
+2 train symbols have 2 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: ITRN_21 HUTCHINSON-245 -> SANTA ROSA-2358 14.7 h; ITRN_28 SANTA ROSA-2358 -> HUTCHINSON-245 14.5 h
 
 Category M
 empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
@@ -74,11 +74,11 @@ set-out tons per run, destination: n 88, min 1,468, median 8,322, mean 7,590, ma
 transfers (a commodity changes trains at a yard): 4; commodities with at least one: 4 of 118
 transfers per commodity: mean 0.03, max 1; distribution {0: 114, 1: 4}
 tons transferred: 133,847 t/week (0.02 x demand)
-7 train symbols have 11 stretches longer than a crew's 12 usable hours between two yard groups, so no crew change can split them: MTRN_85 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_86 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_100 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_126 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_127 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_71 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_85 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_86 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_100 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_120 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; and 1 more
+7 train symbols have 11 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: MTRN_85 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_86 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_100 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_126 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_127 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_71 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_85 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_86 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_100 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; MTRN_120 WINSLOW YARD-415 -> NEEDLES YARD-303 12.9 h; and 1 more
 
 Locomotive balance before circuitous trains
-locomotive movements on legs: 19,415 a week; to reposition to balance every yard group: 4,285
-yard groups where trains start or end: 170; balanced 1, within 10% of their own traffic 24, within 25% of their own traffic 54, one-way 55
+locomotive movements on legs: 19,415 a week; to reposition to balance every yard: 4,285
+yards where trains start or end: 170; balanced 1, within 10% of their own traffic 24, within 25% of their own traffic 54, one-way 55
 
 Circuitous trains
 short empty returns, category A: 3 trains come back with their empty cars (at most 5 of its 5 short trains; 5 could fit in the week)
@@ -87,5 +87,5 @@ short empty returns, category I: 0 trains come back with their empty cars (at mo
 short empty returns, category M: 39 trains come back with their empty cars (at most 58 of its 58 short trains; 58 could fit in the week)
 
 Locomotive balance
-locomotive movements on legs: 21,510 a week; to reposition to balance every yard group: 2,670
-yard groups where trains start or end: 170; balanced 35, within 10% of their own traffic 75, within 25% of their own traffic 104, one-way 23
+locomotive movements on legs: 21,510 a week; to reposition to balance every yard: 2,670
+yards where trains start or end: 170; balanced 35, within 10% of their own traffic 75, within 25% of their own traffic 104, one-way 23

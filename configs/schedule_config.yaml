@@ -70,8 +70,8 @@ network_settings:
     - city: Laredo
       state: TX
   hub_radius_km: 50.0
-  min_od_yg_spacing_km: 5.0
-  min_od_yg_track_km: 2.0
+  min_od_yd_spacing_km: 5.0
+  min_od_yd_track_km: 2.0
   excluded_track_net_codes:
     - A # abandoned
     - R # abandoned and removed

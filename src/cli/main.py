@@ -2,7 +2,7 @@ import typer
 
 from cli.clean import clean
 from cli.config import config_schema
-from cli.network import build_network, list_yard_groups
+from cli.network import build_network, list_yards
 from cli.scenario import generate_scenarios
 from cli.schedule import generate_schedule
 
@@ -17,7 +17,7 @@ app = typer.Typer(
 app.command("build-network")(build_network)
 app.command("schedule")(generate_schedule)
 app.command("scenario")(generate_scenarios)
-app.command("yard-groups")(list_yard_groups)
+app.command("yards")(list_yards)
 app.command("clean")(clean)
 app.command("config-schema")(config_schema)
 

@@ -6,14 +6,14 @@ from itertools import pairwise
 from pathlib import Path
 from statistics import median
 
-from railgen.models import DayOfWeek, TrainCategory, Week, YgKey
+from railgen.models import DayOfWeek, TrainCategory, Week, YdKey
 from railgen.rail_network import RailNetwork
 from railgen.schedule_gen.attributes import (
     RouteSegment,
     TonnageByDay,
     Train,
     TrainSymbol,
-    YardGroupReason,
+    YardReason,
 )
 from railgen.schedule_gen.candidates import CandidateService
 from railgen.schedule_gen.demand import Commodity
@@ -34,9 +34,9 @@ _MAX_START_TRIES = 200
 
 
 # Balance check: every yard's weekly set-outs minus pick-ups must equal its target.
-def solution_yard_net(solution: Solution, index: OdModelIndex) -> dict[YgKey, float]:
+def solution_yard_net(solution: Solution, index: OdModelIndex) -> dict[YdKey, float]:
     """Weekly set-outs minus pick-ups per yard, from a model solution."""
-    net: dict[YgKey, float] = defaultdict(float)
+    net: dict[YdKey, float] = defaultdict(float)
     for (sid, i), tons in solution.set_out.items():
         net[index.services[sid].stops[i]] += tons
     for (sid, i), tons in solution.pick_up.items():
@@ -45,10 +45,10 @@ def solution_yard_net(solution: Solution, index: OdModelIndex) -> dict[YgKey, fl
 
 
 def deviations(
-    net: dict[YgKey, float], targets: dict[YgKey, float], tol: float = 1e-3
-) -> dict[YgKey, float]:
+    net: dict[YdKey, float], targets: dict[YdKey, float], tol: float = 1e-3
+) -> dict[YdKey, float]:
     """Yards whose net differs from the target (targets default to 0 for transit-only yards)."""
-    out: dict[YgKey, float] = {}
+    out: dict[YdKey, float] = {}
     for yard in set(net) | set(targets):
         diff = net.get(yard, 0.0) - targets.get(yard, 0.0)
         if abs(diff) > tol:
@@ -245,12 +245,12 @@ def crew_change_positions(
 
 @dataclass(frozen=True, kw_only=True)
 class LongStretch:
-    """A stretch between two consecutive yard groups that one crew cannot cover within its usable hours."""
+    """A stretch between two consecutive yards that one crew cannot cover within its usable hours."""
 
     symbol: TrainSymbol
-    bgn_yg: YgKey
-    end_yg: YgKey
-    hours: float  # dwell at bgn_yg (if the train works there) plus the run to end_yg
+    bgn_yd: YdKey
+    end_yd: YdKey
+    hours: float  # dwell at bgn_yd (if the train works there) plus the run to end_yd
 
 
 def long_stretch_lines(
@@ -260,14 +260,14 @@ def long_stretch_lines(
     if not stretches:
         return []
     listed = "; ".join(
-        f"{s.symbol} {s.bgn_yg} -> {s.end_yg} {s.hours:.1f} h"
+        f"{s.symbol} {s.bgn_yd} -> {s.end_yd} {s.hours:.1f} h"
         for s in sorted(stretches, key=lambda s: -s.hours)[:shown]
     )
     more = f"; and {len(stretches) - shown:,} more" if len(stretches) > shown else ""
     return [
         (
             f"{len({s.symbol for s in stretches}):,} train symbols have {len(stretches):,} stretches "
-            f"longer than a crew's {usable_hours:g} usable hours between two yard groups, so no crew "
+            f"longer than a crew's {usable_hours:g} usable hours between two yards, so no crew "
             f"change can split them: {listed}{more}"
         )
     ]
@@ -276,7 +276,7 @@ def long_stretch_lines(
 @dataclass(frozen=True, kw_only=True)
 class OutputStop:
     position: int  # index into the service path
-    reason: YardGroupReason
+    reason: YardReason
 
 
 def output_stops(
@@ -329,7 +329,7 @@ def output_stops(
         stops.append(
             OutputStop(
                 position=pos,
-                reason=YardGroupReason(
+                reason=YardReason(
                     pick_up=pos == 0 or pick > _EPS,
                     set_out=pos == last or drop > _EPS,
                     crew_change=pos in crew,
@@ -407,11 +407,11 @@ def build_segments(
         hp_per_ton = power.hp_per_ton(category, grade)
         segments.append(
             RouteSegment(
-                bgn_yg=leg_path[0],
-                end_yg=leg_path[-1],
+                bgn_yd=leg_path[0],
+                end_yd=leg_path[-1],
                 tonnage_by_day=TonnageByDay.new(freight, days),
-                bgn_yg_reason=bgn.reason,
-                end_yg_reason=end.reason,
+                bgn_yd_reason=bgn.reason,
+                end_yd_reason=end.reason,
                 req_counts_by_day=TonnageByDay.new(trailing, days).get_req_loc_counts(
                     hp_per_ton, power.locomotive_hp
                 ),
@@ -472,8 +472,8 @@ def to_trains(
                 long_stretches.extend(
                     LongStretch(
                         symbol=symbol,
-                        bgn_yg=service.path[j],
-                        end_yg=service.path[j + 1],
+                        bgn_yd=service.path[j],
+                        end_yd=service.path[j + 1],
                         hours=hours,
                     )
                     for j, hours in sorted(too_long.items())
@@ -526,7 +526,7 @@ def return_trip(
         (
             _elapsed(leg.dep_day, leg.dep_time, start)
             for leg in outbound[1:]
-            if leg.bgn_yg_reason.crew_change
+            if leg.bgn_yd_reason.crew_change
         ),
         default=0,
     )
@@ -548,7 +548,7 @@ def return_trip(
     turn_crew = 0 in crew
     end = len(path) - 1
     reason = {
-        pos: YardGroupReason(
+        pos: YardReason(
             pick_up=False, set_out=pos == end, crew_change=pos in crew and pos != end
         )
         for pos in sorted({0, end} | crew)
@@ -572,7 +572,7 @@ def return_trip(
 
     if turn_crew:
         outbound[-1] = replace(
-            last, end_yg_reason=replace(last.end_yg_reason, crew_change=True)
+            last, end_yd_reason=replace(last.end_yd_reason, crew_change=True)
         )
     cur = arrival + round(dwell.minutes(False, True, turn_crew))
     legs: list[RouteSegment] = []
@@ -586,11 +586,11 @@ def return_trip(
             return None
         legs.append(
             RouteSegment(
-                bgn_yg=leg_path[0],
-                end_yg=leg_path[-1],
+                bgn_yd=leg_path[0],
+                end_yd=leg_path[-1],
                 tonnage_by_day=TonnageByDay.new(empty_tons, train.days_active),
-                bgn_yg_reason=reason[a],
-                end_yg_reason=reason[b],
+                bgn_yd_reason=reason[a],
+                end_yd_reason=reason[b],
                 req_counts_by_day=locomotives,
                 dep_day=get_elapsed_day(dep, start),
                 arvl_day=get_elapsed_day(cur, start),
@@ -693,7 +693,7 @@ def transfers(
     solution: Solution,
     services: dict[str, CandidateService],
     commodities: list[Commodity],
-) -> dict[tuple[int, YgKey], float]:
+) -> dict[tuple[int, YdKey], float]:
     """(commodity index, yard) -> tons/week of that commodity that change trains there.
 
     A commodity changes trains where it leaves a train at a yard that is not its
@@ -702,7 +702,7 @@ def transfers(
     legs: dict[tuple[str, int], dict[int, float]] = defaultdict(dict)
     for (sid, i, k), tons in solution.flows.items():
         legs[(sid, k)][i] = tons
-    out: dict[tuple[int, YgKey], float] = defaultdict(float)
+    out: dict[tuple[int, YdKey], float] = defaultdict(float)
     for (sid, k), flow in legs.items():
         stops = services[sid].stops
         for j in range(1, len(stops)):

@@ -5,8 +5,8 @@ from test_schedule_input import TRAINS, write_schedule
 from typer.testing import CliRunner
 
 from cli.main import app
-from railgen.models import TrainCategory, Week, YgKey
-from railgen.scenario_gen.distribution_groupings import YardGroupDistributions
+from railgen.models import TrainCategory, Week, YdKey
+from railgen.scenario_gen.distribution_groupings import YardDistributions
 from railgen.scenario_gen.scenario_config import ScenarioGenerationConfig
 from railgen.scenario_gen.scenario_generation import (
     Sample,
@@ -14,8 +14,8 @@ from railgen.scenario_gen.scenario_generation import (
     simulate_day,
 )
 from railgen.scenario_gen.schedule_input import ScheduledTrain, ScheduledTripLeg
-from railgen.scenario_gen.yard_group_resolution import (
-    resolve_yard_group_distributions,
+from railgen.scenario_gen.yard_resolution import (
+    resolve_yard_distributions,
 )
 from railgen.schedule_gen.attributes import TonnageByDay, TrainSymbol
 
@@ -39,7 +39,7 @@ def _cfg(dep: float = 0, count: int = 1, dwell: float = 0) -> ScenarioGeneration
 
 
 def _train(*legs: tuple[str, int, int], days: Week[bool] = WEEKDAYS) -> ScheduledTrain:
-    yg = YgKey.from_raw_str("NORRIS-1750")
+    yd = YdKey.from_raw_str("NORRIS-1750")
     return ScheduledTrain(
         category=TrainCategory.A,
         symbol=TrainSymbol("ATRN_1"),
@@ -47,8 +47,8 @@ def _train(*legs: tuple[str, int, int], days: Week[bool] = WEEKDAYS) -> Schedule
         trips=[
             ScheduledTripLeg(
                 row_id=row_id,
-                bgn_yg=yg,
-                end_yg=yg,
+                bgn_yd=yd,
+                end_yd=yd,
                 tonnage_by_day=TonnageByDay(
                     tonnages=Week(
                         mon=0.0, tue=0.0, wed=0.0, thu=0.0, fri=0.0, sat=0.0, sun=0.0
@@ -67,9 +67,7 @@ def _simulate(train: ScheduledTrain, cfg: ScenarioGenerationConfig):
     return simulate_day(
         train,
         train_dists=cfg.train_distributions_for(TrainCategory.A),
-        yg_dists=YardGroupDistributions(
-            leg_distributions={}, yg_dwell_distributions={}
-        ),
+        yd_dists=YardDistributions(leg_distributions={}, yd_dwell_distributions={}),
         min_dwell_share=0.75,
     )
 
@@ -109,7 +107,7 @@ def test_early_train_is_not_held_and_dwell_never_below_minimum():
 def test_generate_scenario_only_fills_active_days():
     cfg = _cfg(count=3)
     result = generate_scenario(
-        cfg, [_train(("R1", 600, 900))], resolve_yard_group_distributions(cfg, {})
+        cfg, [_train(("R1", 600, 900))], resolve_yard_distributions(cfg, {})
     )
     week = result["R1"]
     assert [len(s) for _, s in week if s is not None] == [3] * 5
