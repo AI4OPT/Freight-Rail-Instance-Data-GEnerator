@@ -353,25 +353,21 @@ def traverse_graph(
     ## Returns:
     - Set of (YardGroup 1, YardGroup 2, km), keeping the shortest distance per pair.
     """
-    trav_graph = nx.Graph()
+    # Track nodes are numbered: (lat, lon) -> node, and adj[node] is neighbor node -> km.
+    nodes: dict[tuple[float, float], int] = {}
+    adj: list[dict[int, float]] = []
     for feat in track(
         raw_network, get_progress_desc_with_padding("Building traverse graph...")
     ):
         if feat.properties.get("NET") in excluded_track_net_codes:
             continue
-        geom = feat.geometry
-
-        coords: list[Coord] = [Coord(lat=x[1], lon=x[0]) for x in geom.coordinates]
-        for i in range(len(coords) - 1):
-            node1, node2 = coords[i], coords[i + 1]
-            dist_from_src_yg = float(
-                haversine(
-                    (node1.lat, node1.lon), (node2.lat, node2.lon), unit=Unit.KILOMETERS
-                )
-            )
-            _ = trav_graph.add_edge(node1, node2, weight=dist_from_src_yg)
-    # Every coordinate of every YardGroup's geometry -> its key. custom_dijkstra stops when it hits one.
-    all_yg_geom_coords: dict[Coord, YgKey] = {}
+        coords = [(x[1], x[0]) for x in feat.geometry.coordinates]
+        line = [nodes.setdefault(c, len(nodes)) for c in coords]
+        adj += [{} for _ in range(len(nodes) - len(adj))]
+        for c1, c2, n1, n2 in zip(coords, coords[1:], line, line[1:]):
+            adj[n1][n2] = adj[n2][n1] = float(haversine(c1, c2, unit=Unit.KILOMETERS))
+    # The YardGroup whose geometry includes each track node. custom_dijkstra stops when it hits one.
+    yg_at: list[YgKey | None] = [None] * len(adj)
     for yg_feat in track(
         raw_ygs, get_progress_desc_with_padding("Building YG geometry map...")
     ):
@@ -381,25 +377,48 @@ def traverse_graph(
         if yg_key not in ygs:
             continue
         geom = yg_feat.geometry
-        if isinstance(geom, LineStringGeometry):
-            for cp in geom.coordinates:
-                all_yg_geom_coords[Coord(lat=cp[1], lon=cp[0])] = yg_key
-        else:
-            for line in geom.coordinates:
-                for cp in line:
-                    all_yg_geom_coords[Coord(lat=cp[1], lon=cp[0])] = yg_key
+        lines = (
+            [geom.coordinates]
+            if isinstance(geom, LineStringGeometry)
+            else geom.coordinates
+        )
+        for line in lines:
+            for cp in line:
+                node = nodes.get((cp[1], cp[0]))
+                if node is not None:
+                    yg_at[node] = yg_key
+
+    srcs = {
+        name: nodes[coord]
+        for name, yg in ygs.items()
+        if (coord := (yg.coord.lat, yg.coord.lon)) in nodes
+    }
+    # Fold each run of plain track (no yard, no junction) into one edge, about 10x fewer nodes to walk.
+    # The edge keeps its segment lengths: summing them up front rounds differently and flips exact ties in drop_redundant_edges.
+    # The nodes next to a start stay: a start that's also on another YardGroup is reached by turning back there.
+    keep = [len(a) != 2 or y is not None for a, y in zip(adj, yg_at)]
+    for src in srcs.values():
+        keep[src] = True
+        for n in adj[src]:
+            keep[n] = True
+    trav_graph: dict[int, dict[int, tuple[float, ...]]] = {
+        n: {} for n in range(len(adj)) if keep[n]
+    }
+    for start, out in trav_graph.items():
+        for end, km in adj[start].items():
+            prev, kms = start, [km]
+            while not keep[end]:
+                prev, end = end, next(n for n in adj[end] if n != prev)
+                kms.append(adj[prev][end])
+            if end != start and (end not in out or sum(kms) < sum(out[end])):
+                out[end] = tuple(kms)
 
     edges: list[tuple[YgKey, YgKey, float]] = []
-    for yg in track(
-        list(ygs.items()),
+    for src_yg_name, src in track(
+        list(srcs.items()),
         description=get_progress_desc_with_padding("Building YG graph..."),
     ):
-        src_yg_name = yg[0]
-        found_connected_ygs = custom_dijkstra(
-            trav_graph,
-            all_yg_geom_coords,
-            yg,
-        )
+        found_connected_ygs = custom_dijkstra(trav_graph, yg_at, src_yg_name, src)
         for neigh_yg_name, dist_to_neigh_yg in found_connected_ygs.items():
             edges.append((src_yg_name, neigh_yg_name, dist_to_neigh_yg))
     best: dict[tuple[YgKey, YgKey], float] = {}
