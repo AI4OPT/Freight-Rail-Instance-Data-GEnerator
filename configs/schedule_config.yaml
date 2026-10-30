@@ -211,7 +211,7 @@ service_design_settings:
       I: 50.0
   circuitous_trains:
     short_empty_returns: { A: 1, M: 1, B: 1, I: 1 } # share of returns per category (A, M, B, I), e.g. {M: 0.5, B: 0.5}
-    long_empty_returns: {B: 1}
+    long_empty_returns: { B: 1 }
     short_max_miles: 200.0
   locomotive_power:
     locomotive_hp: 4400.0

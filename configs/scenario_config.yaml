@@ -11,7 +11,7 @@ default_distributions:
     components:
       - weight: 0.40
         negate: true # drawn as minutes early
-        distribution: 
+        distribution:
           distr_type: weibull
           shape: 1.0
           scale: 86.6
