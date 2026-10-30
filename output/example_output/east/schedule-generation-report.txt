@@ -1,0 +1,94 @@
+Demand
+region east:
+  kept whole: both ends on this side, or a gateway end and the other end here: 160 commodities (6,963,967 t/week)
+  kept whole: gateway to gateway, most of the route on this side: 1 commodities (11,745 t/week)
+  kept whole: crossing flow with a single yard on the other side: 8 commodities (124,846 t/week)
+  cut at the boundary: 64 commodities (1,138,762 t/week)
+    of which cut at a gateway yard: 21
+  not in this region (the other region keeps it): 306 commodities (14,775,908 t/week)
+  in neither region (gateway area only, tie, or one leg across the line): 2 commodities (153,627 t/week)
+gateway yards (in both regions): 187
+FAF 2022 rail + 50% of multimodal, all trade types: 45,807,975 t/week, of which intra-zone 14,192,861
+excluded zones (020), rows from or to them dropped: 300,808 t/week
+excluded flows: 0 t/week
+intra-zone under 30 mi (FAF5 distance), dropped: 3,837 FAF rows, 2,324,622 t/week (16.38% of intra-zone tons, 5.07% of all tons)
+intra-zone with no FAF5 distance, kept: 406,552 t/week
+multimodal on zone pairs under 500 mi (FAF5 distance) or with no FAF5 distance, dropped: 97,409 FAF rows, 6,710,956 t/week (14.65% of all tons)
+multimodal on zone pairs over 2500 mi (FAF5 distance), dropped: 74,174 FAF rows, 347,337 t/week (0.76% of all tons)
+intra-zone in zones with a single yard, dropped: 4,480 t/week
+zone pairs with no yard pair (a zone has no yard), dropped: 41,000 t/week
+inter-zone, every yard pair under 50 km (local trains), dropped: 30,884 t/week
+category A: 4,930 of 4,966 zone pairs below 1600 t/week, dropped (221,074 of 406,267 t/week, 54.42% of the category's tons)
+category M: 9,798 of 10,017 zone pairs below 9000 t/week, dropped (5,762,255 of 12,682,969 t/week, 45.43% of the category's tons)
+category B: 5,978 of 6,234 zone pairs below 13000 t/week, dropped (3,117,979 of 19,707,985 t/week, 15.82% of the category's tons)
+category I: 11,694 of 11,759 zone pairs below 7400 t/week, dropped (2,205,452 of 3,250,667 t/week, 67.85% of the category's tons)
+all categories: 32,400 zone-pair flows dropped, 11,306,760 of 36,047,888 t/week (31.37% of all tons)
+intra-zone on a yard pair under 50 km (local trains), dropped: 1,572,274 t/week
+kept after every drop: 23,168,855 t/week
+  rail: 22,123,639 t/week (95.5%; domestic 17,720,991, import 1,175,255, export 3,227,393)
+  multimodal at 50%: 1,045,215 t/week (4.5%; domestic 1,021,189, import 7,882, export 16,144)
+
+Category A
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 159,991, at intermediate stops 0
+set out t/week: at destination 159,991, at intermediate stops 0
+intermediate stops of selected services: 84 (pick-up only 0, set-out only 0, both 0, no work 84)
+pick-up tons per run, origin: n 21, min 930, median 1,325, mean 1,325, max 1,628
+set-out tons per run, destination: n 21, min 930, median 1,325, mean 1,325, max 1,628
+transfers (a commodity changes trains at a yard): 0; commodities with at least one: 0 of 30
+transfers per commodity: mean 0.00, max 0; distribution {0: 30}
+tons transferred: 0 t/week (0.00 x demand)
+
+Category B
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 4,534,153, at intermediate stops 648,135
+set out t/week: at destination 4,296,069, at intermediate stops 886,218
+intermediate stops of selected services: 268 (pick-up only 22, set-out only 26, both 2, no work 218)
+pick-up tons per run, origin: n 73, min 1,390, median 11,188, mean 10,534, max 13,178
+pick-up tons per run, intermediate: n 24, min 536, median 3,535, mean 3,861, max 10,607
+set-out tons per run, intermediate: n 28, min 411, median 3,074, mean 3,900, max 11,829
+set-out tons per run, destination: n 73, min 1,350, median 11,167, mean 10,308, max 13,178
+transfers (a commodity changes trains at a yard): 9; commodities with at least one: 8 of 94
+transfers per commodity: mean 0.10, max 2; distribution {0: 86, 1: 7, 2: 1}
+tons transferred: 193,158 t/week (0.04 x demand)
+
+Category I
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 560,094, at intermediate stops 64,185
+set out t/week: at destination 579,707, at intermediate stops 44,571
+intermediate stops of selected services: 282 (pick-up only 7, set-out only 5, both 0, no work 270)
+pick-up tons per run, origin: n 31, min 2,835, median 5,065, mean 5,114, max 7,228
+pick-up tons per run, intermediate: n 7, min 735, median 2,349, mean 2,268, max 3,630
+set-out tons per run, intermediate: n 5, min 735, median 2,349, mean 1,949, max 2,509
+set-out tons per run, destination: n 31, min 2,633, median 5,190, mean 5,312, max 7,407
+transfers (a commodity changes trains at a yard): 4; commodities with at least one: 3 of 37
+transfers per commodity: mean 0.11, max 2; distribution {0: 34, 1: 2, 2: 1}
+tons transferred: 37,739 t/week (0.06 x demand)
+
+Category M
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 2,344,129, at intermediate stops 252,510
+set out t/week: at destination 2,228,526, at intermediate stops 368,113
+intermediate stops of selected services: 230 (pick-up only 9, set-out only 19, both 9, no work 193)
+pick-up tons per run, origin: n 55, min 2,798, median 7,887, mean 7,476, max 9,286
+pick-up tons per run, intermediate: n 18, min 58, median 3,042, mean 2,806, max 6,867
+set-out tons per run, intermediate: n 28, min 53, median 2,886, mean 2,738, max 6,867
+set-out tons per run, destination: n 55, min 924, median 7,367, mean 7,001, max 9,228
+transfers (a commodity changes trains at a yard): 6; commodities with at least one: 6 of 72
+transfers per commodity: mean 0.08, max 1; distribution {0: 66, 1: 6}
+tons transferred: 92,977 t/week (0.04 x demand)
+
+Locomotive balance before circuitous trains
+locomotive movements on legs: 8,259 a week; to reposition to balance every yard: 2,052
+yards where trains start or end: 107; balanced 1, within 10% of their own traffic 14, within 25% of their own traffic 35, one-way 42
+
+Circuitous trains
+short empty returns, category A: 3 trains come back with their empty cars (at most 8 of its 8 short trains; 8 could fit in the week)
+long empty returns, category B: 33 trains come back with their empty cars (at most 59 of its 59 long trains; 59 could fit in the week)
+short empty returns, category B: 25 trains come back with their empty cars (at most 36 of its 36 short trains; 36 could fit in the week)
+short empty returns, category I: 1 trains come back with their empty cars (at most 1 of its 1 short trains; 1 could fit in the week)
+short empty returns, category M: 20 trains come back with their empty cars (at most 35 of its 35 short trains; 35 could fit in the week)
+
+Locomotive balance
+locomotive movements on legs: 11,015 a week; to reposition to balance every yard: 849
+yards where trains start or end: 107; balanced 25, within 10% of their own traffic 58, within 25% of their own traffic 74, one-way 13

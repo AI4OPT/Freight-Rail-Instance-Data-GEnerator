@@ -9,27 +9,22 @@ default_distributions:
   initial_departure:
     distr_type: mixture
     components:
-      - weight: 0.25
-        distribution: # always 0
-          distr_type: normal
-          mean: 0.0
-          stdev: 0.0
       - weight: 0.40
         negate: true # drawn as minutes early
-        distribution: # exponential, mean 86.6 = 60 / ln 2
+        distribution:
           distr_type: weibull
           shape: 1.0
           scale: 86.6
-      - weight: 0.35
-        distribution: # mean about 141
+      - weight: 0.60
+        distribution:
           distr_type: weibull
-          shape: 0.685
-          scale: 108.9
-  trip_time_percent_diff: # percent of planned run time; half slower, half faster (mean 5 each); 80% within ±8
-    distr_type: asymmetric_laplace
-    location: 0.0
-    scale: 5.0
-    skew: 1.0
+          shape: 0.5
+          scale: 30.0
+  trip_time_percent_diff:
+    distr_type: log_normal
+    location: -20.0
+    log_mean: 3.0
+    log_stdev: 0.32
   dwell_time:
     distr_type: log_normal
     location: -40.0

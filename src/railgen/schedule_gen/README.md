@@ -143,7 +143,7 @@ Each region saves its own solutions (`solution_<category>_east.json`, `..._west.
 
 One candidate per kept yard pair and train type. Its path is the yard pair's route; its potential stops are the ends and every _allowed_ yard on the way (the zone yards plus the `work_yards_per_state` largest yards per state); its legs run between consecutive potential stops.
 
-A leg's capacity is the freight one run may carry: `max_trailing_tons_per_run_by_category` / (1 + empty car tons / cargo tons per car). E.g. 13,000 trailing tons with 33-t cars carrying 90 t hold 9,512 t of freight.
+A leg's capacity is the freight one run may carry: `max_trailing_tons_per_run_by_category` / (1 + empty car tons / cargo tons per car). E.g. 13,000 trailing tons with 33-t cars carrying 82.5 t hold 9,286 t of freight.
 
 ### 2c. One Model per Category (`solve_by_category.py`)
 
@@ -258,15 +258,13 @@ Sources of the default values:
 - Car weights (`car_weight`): A, M and I, medians of the auto, mixed and double-stack trains in FRA (2009), Exhibit A-1; B, the ore car in Lustbader et al. (2025), Table 13.
 - hp per ton (`hp_per_ton_by_category`): A and I, medians in FRA (2009), Exhibit A-1; M, Lustbader et al. (2025), Table 15; B, Dingler, Lai and Barkan (2014), Table 2.
 - Crew duty limit (`crew.duty_hours`): 12 hours, 49 U.S.C. 21103.
-- Train costs (`costs.train_start`, `costs.per_train_mile`): 400 per run and 10 per train-mile, the values of the INFORMS RAS 2011 train design competition, also used by Khaled et al. (2015). The other costs (`per_distinct_train`, `transfer_fixed`, `transfer_per_ton`) default to 0 and have no published source; only the ratios between costs change the solution.
+- Costs (`costs`): no published source; only the ratios between costs change the solution.
 
 References:
 
 - Chouman, M. and Crainic, T. G. (2021). Freight railroad service network design. In _Network Design with Applications to Transportation and Logistics_, Springer, pp. 383–426.
 - Dingler, M. H., Lai, Y.-C. and Barkan, C. P. L. (2014). Effect of train-type heterogeneity on single-track heavy haul railway line capacity. _Journal of Rail and Rapid Transit_, 228(8), 845–856.
 - Federal Railroad Administration (2009). _Comparative Evaluation of Rail and Truck Fuel Efficiency on Competitive Corridors_. Final report, ICF International.
-- INFORMS Railway Applications Section (2011). _2011 RAS Problem Solving Competition: Train Design Optimization_. https://connect.informs.org/railway-applications/new-item3/problem-repository16
-- Khaled, A. A., Jin, M., Clarke, D. B. and Hoque, M. A. (2015). Train design and routing optimization for evaluating criticality of freight railroad infrastructures. _Transportation Research Part B_, 71, 71–84.
 - Lustbader, J. et al. (2025). _Final Report for ARPA-E LOCOMOTIVES ALTRIOS Project_. NREL/TP-5400-96872, National Renewable Energy Laboratory.
 - Surface Transportation Board. _United States Rail Service Issues – Performance Data Reporting_, Docket EP 724. https://www.stb.gov/reports-data/rail-service-data/
 - U.S. Department of Agriculture, Agricultural Marketing Service. _Train Speeds_, AgTransport. https://agtransport.usda.gov/Rail/Train-Speeds/2wy9-nmz4

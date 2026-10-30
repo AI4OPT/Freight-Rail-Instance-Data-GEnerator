@@ -27,10 +27,10 @@ class GeneralConfig(BaseModel):
         OUTPUT_DIR_NAME, description="Directory that generated data is written to."
     )
     seg_freq_arc_cost_discount_alpha: float = Field(
-        0.2, description="Weight α of the phase-2 discount on busy segments."
+        0.3, description="Weight α of the phase-2 discount on busy segments."
     )
     normalized_seg_arc_cost_exponent_lambda: float = Field(
-        0.6,
+        0.5,
         alias="lambda",
         description="Exponent λ of the phase-2 discount on busy segments.",
     )
@@ -208,12 +208,12 @@ class YardPairRule(BaseModel):
         description="split_by_tonnage only: tons/week per extra yard pair.",
     )
     distance_tolerance: float = Field(
-        0.15,
+        0.4,
         description="Between two zones, yard pairs whose route cost is over (1 + this) x the cheapest are left out.",
     )
     max_pairs: int = Field(3, ge=1, description="split_by_tonnage only.")
     min_route_km: float = Field(
-        40.0,
+        50.0,
         ge=0,
         description="Local-train distance (km). Inter-zone: yard pairs with a shorter route are not candidates; a zone pair with none left is dropped. Intra-zone: tons whose assigned yard pair is shorter are dropped.",
     )
@@ -224,20 +224,20 @@ class YardPairRule(BaseModel):
 class Costs(BaseModel):
     """Objective weights."""
 
-    train_start: float = Field(400.0, description="Cost of one run of a train.")
+    train_start: float = Field(500.0, description="Cost of one run of a train.")
     per_train_mile: float = Field(
-        10.0, description="Cost per mile of one run, over its whole route."
+        0.5, description="Cost per mile of one run, over its whole route."
     )
     per_distinct_train: float = Field(
-        0.0,
+        10_000.0,
         description="Weekly charge for each service (yard pair and train type) that runs at all. 0 leaves out its binary variables.",
     )
     transfer_fixed: float = Field(
-        0.0,
+        50.0,
         description="Cost of each change of train of a commodity at a yard.",
     )
     transfer_per_ton: float = Field(
-        0.0,
+        0.1,
         description="Added per ton/week of the commodity that changes trains. Both 0 leaves out the transfer variables.",
     )
 
@@ -390,7 +390,7 @@ class SolverSettings(BaseModel):
         description="Time limit of each category's solve (s); the best solution found is used.",
     )
     mip_gap: float = Field(
-        0.02,
+        0.01,
         description="Relative gap at which a category's solve stops.",
     )
     log_file: str | None = Field(
@@ -442,15 +442,15 @@ class CircuitousTrains(BaseModel):
     or does not fit in the week, is not added."""
 
     short_empty_returns: dict[str, float] = Field(
-        default_factory=dict,
+        default_factory=lambda: {"A": 1.0, "M": 1.0, "B": 1.0, "I": 1.0},
         description="Per category, e.g. {M: 0.5}: share of its short trains (at most `short_max_miles` one way) that may come back; unlisted get none.",
     )
     long_empty_returns: dict[str, float] = Field(
-        default_factory=dict,
+        default_factory=lambda: {"B": 1.0},
         description="Per category: share of its long trains that may come back; unlisted get none.",
     )
     short_max_miles: float = Field(
-        225.0,
+        200.0,
         gt=0,
         description="One-way miles up to which a train is short.",
     )
@@ -508,11 +508,11 @@ class ServiceDesignSettings(BaseModel):
         description="FAF flows left out of demand (origin zone, destination zone, SCTG codes), with a reason for the report.",
     )
     intra_zone_min_miles: float = Field(
-        25.0,
+        30.0,
         description="Intra-zone FAF rows averaging fewer miles (FAF5) are local switching and dropped; rows with no FAF5 distance are kept.",
     )
     min_od_tons_per_week: dict[str, float] = Field(
-        default_factory=lambda: {"A": 3000.0, "M": 15000.0, "B": 20000.0, "I": 8000.0},
+        default_factory=lambda: {"A": 1600.0, "M": 9000.0, "B": 13000.0, "I": 7400.0},
         description="Per category: a train type's tons/week on a zone pair below this are dropped, before the yard-pair split (without `shared_bulk`, each B group on its own); unlisted categories keep all.",
     )
     yard_pairs: YardPairRule = Field(default_factory=YardPairRule)

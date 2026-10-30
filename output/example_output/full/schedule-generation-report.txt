@@ -1,0 +1,91 @@
+Demand
+FAF 2022 rail + 50% of multimodal, all trade types: 45,807,975 t/week, of which intra-zone 14,192,861
+excluded zones (020), rows from or to them dropped: 300,808 t/week
+excluded flows: 0 t/week
+intra-zone under 30 mi (FAF5 distance), dropped: 3,837 FAF rows, 2,324,622 t/week (16.38% of intra-zone tons, 5.07% of all tons)
+intra-zone with no FAF5 distance, kept: 406,552 t/week
+multimodal on zone pairs under 500 mi (FAF5 distance) or with no FAF5 distance, dropped: 97,409 FAF rows, 6,710,956 t/week (14.65% of all tons)
+multimodal on zone pairs over 2500 mi (FAF5 distance), dropped: 74,174 FAF rows, 347,337 t/week (0.76% of all tons)
+intra-zone in zones with a single yard, dropped: 4,480 t/week
+zone pairs with no yard pair (a zone has no yard), dropped: 41,000 t/week
+inter-zone, every yard pair under 50 km (local trains), dropped: 30,884 t/week
+category A: 4,930 of 4,966 zone pairs below 1600 t/week, dropped (221,074 of 406,267 t/week, 54.42% of the category's tons)
+category M: 9,798 of 10,017 zone pairs below 9000 t/week, dropped (5,762,255 of 12,682,969 t/week, 45.43% of the category's tons)
+category B: 5,978 of 6,234 zone pairs below 13000 t/week, dropped (3,117,979 of 19,707,985 t/week, 15.82% of the category's tons)
+category I: 11,694 of 11,759 zone pairs below 7400 t/week, dropped (2,205,452 of 3,250,667 t/week, 67.85% of the category's tons)
+all categories: 32,400 zone-pair flows dropped, 11,306,760 of 36,047,888 t/week (31.37% of all tons)
+intra-zone on a yard pair under 50 km (local trains), dropped: 1,572,274 t/week
+kept after every drop: 23,168,855 t/week
+  rail: 22,123,639 t/week (95.5%; domestic 17,720,991, import 1,175,255, export 3,227,393)
+  multimodal at 50%: 1,045,215 t/week (4.5%; domestic 1,021,189, import 7,882, export 16,144)
+
+Category A
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 168,870, at intermediate stops 34,854
+set out t/week: at destination 163,404, at intermediate stops 40,320
+intermediate stops of selected services: 221 (pick-up only 1, set-out only 1, both 5, no work 214)
+pick-up tons per run, origin: n 27, min 930, median 1,306, mean 1,304, max 1,648
+pick-up tons per run, intermediate: n 6, min 375, median 591, mean 609, max 1,007
+set-out tons per run, intermediate: n 6, min 388, median 628, mean 699, max 1,054
+set-out tons per run, destination: n 27, min 553, median 1,306, mean 1,284, max 1,648
+transfers (a commodity changes trains at a yard): 5; commodities with at least one: 5 of 34
+transfers per commodity: mean 0.15, max 1; distribution {0: 29, 1: 5}
+tons transferred: 32,977 t/week (0.19 x demand)
+4 train symbols have 4 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: ATRN_14 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_17 HUTCHINSON-245 -> SANTA ROSA-2358 18.4 h; ATRN_15 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h; ATRN_19 SANTA ROSA-2358 -> HUTCHINSON-245 18.1 h
+
+Category B
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 12,890,119, at intermediate stops 3,254,772
+set out t/week: at destination 12,142,427, at intermediate stops 4,002,464
+intermediate stops of selected services: 648 (pick-up only 57, set-out only 80, both 23, no work 488)
+pick-up tons per run, origin: n 159, min 895, median 11,411, mean 10,490, max 13,178
+pick-up tons per run, intermediate: n 80, min 299, median 4,203, mean 4,486, max 12,045
+set-out tons per run, intermediate: n 103, min 78, median 3,936, mean 4,202, max 11,770
+set-out tons per run, destination: n 159, min 836, median 11,188, mean 10,025, max 13,178
+transfers (a commodity changes trains at a yard): 29; commodities with at least one: 23 of 238
+transfers per commodity: mean 0.12, max 3; distribution {0: 215, 1: 18, 2: 4, 3: 1}
+tons transferred: 763,715 t/week (0.05 x demand)
+10 train symbols have 13 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: BTRN_218 HUTCHINSON-245 -> SANTA ROSA-2358 20.3 h; BTRN_160 HUTCHINSON-245 -> SANTA ROSA-2358 19.8 h; BTRN_161 HUTCHINSON-245 -> SANTA ROSA-2358 19.8 h; BTRN_217 ALFALFA-2033 -> SAN ANGELO-2012 18.6 h; BTRN_27 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_28 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_29 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_122 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_123 LYNNDYL-2237 -> VALLEY-2424 13.6 h; BTRN_143 WISHRAM-416 -> KLAMATH FALLS YARD-2211 12.7 h; and 3 more
+
+Category I
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 986,298, at intermediate stops 137,526
+set out t/week: at destination 942,651, at intermediate stops 181,173
+intermediate stops of selected services: 506 (pick-up only 12, set-out only 12, both 2, no work 480)
+pick-up tons per run, origin: n 54, min 2,569, median 5,166, mean 5,218, max 7,347
+pick-up tons per run, intermediate: n 14, min 1,157, median 2,450, mean 2,460, max 4,838
+set-out tons per run, intermediate: n 14, min 1,157, median 2,303, mean 2,589, max 6,167
+set-out tons per run, destination: n 54, min 775, median 5,272, mean 5,184, max 7,407
+transfers (a commodity changes trains at a yard): 7; commodities with at least one: 6 of 65
+transfers per commodity: mean 0.11, max 2; distribution {0: 59, 1: 5, 2: 1}
+tons transferred: 78,609 t/week (0.08 x demand)
+3 train symbols have 3 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: ITRN_19 HUTCHINSON-245 -> SANTA ROSA-2358 14.7 h; ITRN_55 HUTCHINSON-245 -> SANTA ROSA-2358 14.7 h; ITRN_26 SANTA ROSA-2358 -> HUTCHINSON-245 14.5 h
+
+Category M
+empty legs cut (trains start at their first pick-up, end at their last set-out and are split where a leg carries nothing): 0 end and 0 middle legs of 0 trains, 0 trains added by splits, 0 train-km/week; trains with no freight left out: 0
+picked up t/week: at origin 5,572,536, at intermediate stops 1,323,323
+set out t/week: at destination 5,231,726, at intermediate stops 1,664,133
+intermediate stops of selected services: 625 (pick-up only 39, set-out only 56, both 24, no work 506)
+pick-up tons per run, origin: n 132, min 1,408, median 7,134, mean 6,944, max 9,286
+pick-up tons per run, intermediate: n 63, min 58, median 2,599, mean 2,977, max 7,942
+set-out tons per run, intermediate: n 80, min 55, median 2,158, mean 2,834, max 7,942
+set-out tons per run, destination: n 132, min 1,155, median 6,962, mean 6,647, max 9,286
+transfers (a commodity changes trains at a yard): 22; commodities with at least one: 20 of 204
+transfers per commodity: mean 0.11, max 2; distribution {0: 184, 1: 18, 2: 2}
+tons transferred: 324,143 t/week (0.05 x demand)
+14 train symbols have 20 stretches longer than a crew's 12 usable hours between two yards, so no crew change can split them: MTRN_78 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_79 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_80 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_111 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_112 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_141 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_161 HUTCHINSON-245 -> SANTA ROSA-2358 20.4 h; MTRN_130 SANTA ROSA-2358 -> HUTCHINSON-245 20.1 h; MTRN_174 LYNNDYL-2237 -> VALLEY-2424 14.3 h; MTRN_136 WISHRAM-416 -> KLAMATH FALLS YARD-2211 13.4 h; and 10 more
+
+Locomotive balance before circuitous trains
+locomotive movements on legs: 27,220 a week; to reposition to balance every yard: 5,362
+yards where trains start or end: 188; balanced 1, within 10% of their own traffic 36, within 25% of their own traffic 78, one-way 48
+
+Circuitous trains
+short empty returns, category A: 3 trains come back with their empty cars (at most 8 of its 8 short trains; 8 could fit in the week)
+long empty returns, category B: 81 trains come back with their empty cars (at most 178 of its 178 long trains; 171 could fit in the week)
+short empty returns, category B: 45 trains come back with their empty cars (at most 68 of its 68 short trains; 68 could fit in the week)
+short empty returns, category I: 0 trains come back with their empty cars (at most 0 of its 0 short trains; 0 could fit in the week)
+short empty returns, category M: 36 trains come back with their empty cars (at most 67 of its 67 short trains; 67 could fit in the week)
+
+Locomotive balance
+locomotive movements on legs: 36,349 a week; to reposition to balance every yard: 2,363
+yards where trains start or end: 188; balanced 34, within 10% of their own traffic 109, within 25% of their own traffic 145, one-way 17

@@ -159,25 +159,19 @@ service_design_settings:
     manifest: M
     automotive: A
     intermodal: I
-  excluded_flows:
-    - origin_zone: "261"
-      destination_zone: "261"
-      sctg:
-        - "11"
-        - "12"
-      reason: "Detroit intra-zone sand and gravel: 1.08M t/week which is 28% of FAF's national rail aggregates, about half of AAR's national total."
-  intra_zone_min_miles: 25.0
+  excluded_flows: []
+  intra_zone_min_miles: 30.0
   min_od_tons_per_week:
-    A: 3000.0
-    M: 15000.0
-    B: 20000.0
-    I: 8000.0
+    A: 1600.0
+    M: 9000.0
+    B: 13000.0
+    I: 7400.0
   yard_pairs:
     assignment: one_per_category
     tonnage_step: 11000.0 # split_by_tonnage only
     distance_tolerance: 0.4
     max_pairs: 3 # split_by_tonnage only
-    min_route_km: 40.0
+    min_route_km: 50.0
   work_yards_per_state: 3
   max_trailing_tons_per_run_by_category:
     A: 6500.0
@@ -185,13 +179,13 @@ service_design_settings:
     B: 17000.0
     I: 12000.0
   max_runs_per_week: 7
-  max_symbols_per_service: 2
+  max_symbols_per_service: 3
   costs:
-    train_start: 300.0
-    per_train_mile: 0.1
-    per_distinct_train: 7500.0
-    transfer_fixed: 100.0
-    transfer_per_ton: 0.05
+    train_start: 500.0
+    per_train_mile: 0.5
+    per_distinct_train: 10000.0
+    transfer_fixed: 50.0
+    transfer_per_ton: 0.1
   crew:
     duty_hours: 12.0
     terminal_hours: 0.0
@@ -206,31 +200,31 @@ service_design_settings:
     pu_so_crew: 140.0
   car_weight:
     empty_car_tons_by_category:
-      A: 50.0
+      A: 53.0
       M: 33.0
       B: 29.0
-      I: 30.0
+      I: 31.0
     cargo_tons_per_car_by_category:
-      A: 20.0
-      M: 90.0
+      A: 18.0
+      M: 82.5
       B: 100.0
-      I: 60.0
+      I: 50.0
   circuitous_trains:
     short_empty_returns: { A: 1, M: 1, B: 1, I: 1 } # share of returns per category (A, M, B, I), e.g. {M: 0.5, B: 0.5}
-    long_empty_returns: {}
-    short_max_miles: 225.0
+    long_empty_returns: { B: 1 }
+    short_max_miles: 200.0
   locomotive_power:
     locomotive_hp: 4400.0
     hp_per_ton_by_category:
       A: 1.4
-      M: 1.3
+      M: 1.5
       B: 0.78
-      I: 1.7
+      I: 1.9
     rolling_resistance_lb_per_ton: 2.0
     min_speed_mph: 10.0
     transmission_efficiency: 0.82
     grade_window_km: 10.0
   solver:
     time_limit_s: 600.0
-    mip_gap: 0.02
+    mip_gap: 0.01
     log_file: gurobi_service_design.log

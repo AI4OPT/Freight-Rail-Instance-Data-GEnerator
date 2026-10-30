@@ -1,0 +1,61 @@
+{
+  "generation_rng_seed": 42,
+  "od_assignment": {
+    "yds_per_zone": 3,
+    "zones_total": 134,
+    "zones_represented": 131,
+    "zones_unrepresented": [
+      "109",
+      "151",
+      "159"
+    ],
+    "zones_under_target": 19,
+    "yards_designated": 369
+  },
+  "output_stats": {
+    "unique_route_od_pairs_count": 161,
+    "unique_segment_od_pairs_count": 509,
+    "used_yards_count": 224,
+    "total_pick_ups": 295,
+    "total_set_outs": 392,
+    "output_rows_count": 751
+  },
+  "train_category_statistics": {
+    "A": {
+      "train_symbol_count": 28,
+      "total_pick_ups": 28,
+      "total_set_outs": 31,
+      "req_loc_count_avg": 2.514851485148515,
+      "req_loc_count_min": 2,
+      "req_loc_count_max": 3,
+      "req_loc_count_stdev": 0.4997793847177807
+    },
+    "B": {
+      "train_symbol_count": 95,
+      "total_pick_ups": 131,
+      "total_set_outs": 196,
+      "req_loc_count_avg": 3.141272621132516,
+      "req_loc_count_min": 1,
+      "req_loc_count_max": 6,
+      "req_loc_count_stdev": 0.8889974234857769
+    },
+    "I": {
+      "train_symbol_count": 33,
+      "total_pick_ups": 41,
+      "total_set_outs": 39,
+      "req_loc_count_avg": 4.348773841961853,
+      "req_loc_count_min": 2,
+      "req_loc_count_max": 6,
+      "req_loc_count_stdev": 0.8567045221229072
+    },
+    "M": {
+      "train_symbol_count": 73,
+      "total_pick_ups": 95,
+      "total_set_outs": 126,
+      "req_loc_count_avg": 4.27360774818402,
+      "req_loc_count_min": 1,
+      "req_loc_count_max": 5,
+      "req_loc_count_stdev": 1.0848754678594268
+    }
+  }
+}

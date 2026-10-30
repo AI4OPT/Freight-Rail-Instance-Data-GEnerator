@@ -52,7 +52,7 @@
     },
     "Distributions": {
       "additionalProperties": false,
-      "description": "Each dist is either a fully defined distribution or the name of a predefined distribution.\nDefaults are exponential with illustrative means: delays only, never early.",
+      "description": "Each dist is either a fully defined distribution or the name of a predefined distribution.",
       "properties": {
         "initial_departure": {
           "anyOf": [
@@ -380,7 +380,7 @@
           "title": "Seed"
         },
         "scenario_count": {
-          "default": 10,
+          "default": 50,
           "description": "Number of scenarios to generate.",
           "title": "Scenario Count",
           "type": "integer"

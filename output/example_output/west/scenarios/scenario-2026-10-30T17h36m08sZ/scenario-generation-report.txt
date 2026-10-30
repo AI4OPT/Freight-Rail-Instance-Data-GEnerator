@@ -1,0 +1,81 @@
+Delays are actual minus scheduled, in minutes; negative is early.
+A train run is one sample of one train on one day it runs.
+
+Run
+seed: 42
+samples per train and running day: 50
+train symbols: 331, legs: 1,489
+train runs: 75,450
+intermediate stops: 1,158; minimum dwell 75% of the planned dwell, the rest is a buffer late trains use to recover
+
+Category A
+train runs: 3,450
+first departure delay: mean 1, p10 -124, median 0, p90 95, p99 497, min -616, max 2023
+first departures early: 40.1%
+final arrival delay: mean 83, p10 -87, median 65, p90 267, p99 601, min -649, max 2109
+final arrivals early: 29.1%
+final arrivals more than 0 min late: 70.4%
+final arrivals more than 60 min late: 51.5%
+final arrivals more than 120 min late: 34.2%
+final arrivals more than 240 min late: 12.5%
+
+Category B
+train runs: 40,950
+first departure delay: mean 2, p10 -119, median 0, p90 98, p99 528, min -764, max 2643
+first departures early: 39.6%
+final arrival delay: mean 57, p10 -92, median 30, p90 234, p99 619, min -739, max 2660
+final arrivals early: 33.9%
+final arrivals more than 0 min late: 65.1%
+final arrivals more than 60 min late: 38.6%
+final arrivals more than 120 min late: 23.8%
+final arrivals more than 240 min late: 9.5%
+
+Category I
+train runs: 4,900
+first departure delay: mean 1, p10 -126, median 1, p90 96, p99 519, min -643, max 1501
+first departures early: 39.4%
+final arrival delay: mean 49, p10 -103, median 34, p90 206, p99 576, min -662, max 1470
+final arrivals early: 34.9%
+final arrivals more than 0 min late: 64.2%
+final arrivals more than 60 min late: 39.9%
+final arrivals more than 120 min late: 23.0%
+final arrivals more than 240 min late: 7.4%
+
+Category M
+train runs: 26,150
+first departure delay: mean 1, p10 -120, median 0, p90 96, p99 496, min -694, max 2330
+first departures early: 39.9%
+final arrival delay: mean 45, p10 -94, median 23, p90 202, p99 558, min -682, max 2349
+final arrivals early: 35.4%
+final arrivals more than 0 min late: 63.3%
+final arrivals more than 60 min late: 34.5%
+final arrivals more than 120 min late: 20.0%
+final arrivals more than 240 min late: 7.3%
+
+All categories
+train runs: 75,450
+first departure delay: mean 2, p10 -120, median 0, p90 97, p99 515, min -764, max 2643
+first departures early: 39.7%
+final arrival delay: mean 53, p10 -93, median 29, p90 224, p99 591, min -739, max 2660
+final arrivals early: 34.3%
+final arrivals more than 0 min late: 64.6%
+final arrivals more than 60 min late: 37.9%
+final arrivals more than 120 min late: 22.9%
+final arrivals more than 240 min late: 8.8%
+
+Final arrival delay by number of legs in the train
+1 leg: train runs 10,400, mean 5, p10 -122, median 0, p90 111, p99 507, min -739, max 2660
+2 legs: train runs 23,200, mean 18, p10 -110, median 10, p90 131, p99 533, min -682, max 2623
+3 legs: train runs 6,500, mean 32, p10 -103, median 20, p90 163, p99 555, min -677, max 1911
+4 legs: train runs 3,800, mean 44, p10 -98, median 31, p90 184, p99 556, min -723, max 1539
+5 legs: train runs 6,250, mean 57, p10 -90, median 41, p90 208, p99 637, min -591, max 2109
+6 legs: train runs 4,800, mean 73, p10 -79, median 58, p90 234, p99 571, min -735, max 2096
+7 legs: train runs 4,900, mean 87, p10 -68, median 71, p90 259, p99 603, min -717, max 1733
+8 legs: train runs 3,750, mean 89, p10 -69, median 68, p90 262, p99 630, min -519, max 2304
+9 legs: train runs 2,450, mean 112, p10 -42, median 92, p90 290, p99 645, min -459, max 1401
+10 legs: train runs 2,500, mean 134, p10 -40, median 118, p90 324, p99 633, min -551, max 1589
+11 legs: train runs 3,200, mean 142, p10 -31, median 126, p90 334, p99 733, min -564, max 2210
+12 legs: train runs 1,100, mean 142, p10 -35, median 120, p90 350, p99 626, min -397, max 1209
+13 legs: train runs 600, mean 146, p10 -27, median 126, p90 356, p99 679, min -526, max 1073
+15 legs: train runs 1,400, mean 185, p10 -13, median 171, p90 389, p99 713, min -386, max 1422
+19 legs: train runs 600, mean 253, p10 33, median 228, p90 487, p99 905, min -590, max 1849

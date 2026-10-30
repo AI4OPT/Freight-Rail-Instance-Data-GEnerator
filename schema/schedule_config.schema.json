@@ -45,7 +45,7 @@
           "type": "object"
         },
         "short_max_miles": {
-          "default": 225.0,
+          "default": 200.0,
           "description": "One-way miles up to which a train is short.",
           "exclusiveMinimum": 0,
           "title": "Short Max Miles",
@@ -60,31 +60,31 @@
       "description": "Objective weights.",
       "properties": {
         "train_start": {
-          "default": 400.0,
+          "default": 500.0,
           "description": "Cost of one run of a train.",
           "title": "Train Start",
           "type": "number"
         },
         "per_train_mile": {
-          "default": 10.0,
+          "default": 0.5,
           "description": "Cost per mile of one run, over its whole route.",
           "title": "Per Train Mile",
           "type": "number"
         },
         "per_distinct_train": {
-          "default": 0.0,
+          "default": 10000.0,
           "description": "Weekly charge for each service (yard pair and train type) that runs at all. 0 leaves out its binary variables.",
           "title": "Per Distinct Train",
           "type": "number"
         },
         "transfer_fixed": {
-          "default": 0.0,
+          "default": 50.0,
           "description": "Cost of each change of train of a commodity at a yard.",
           "title": "Transfer Fixed",
           "type": "number"
         },
         "transfer_per_ton": {
-          "default": 0.0,
+          "default": 0.1,
           "description": "Added per ton/week of the commodity that changes trains. Both 0 leaves out the transfer variables.",
           "title": "Transfer Per Ton",
           "type": "number"
@@ -227,13 +227,13 @@
           "type": "string"
         },
         "seg_freq_arc_cost_discount_alpha": {
-          "default": 0.2,
+          "default": 0.3,
           "description": "Weight \u03b1 of the phase-2 discount on busy segments.",
           "title": "Seg Freq Arc Cost Discount Alpha",
           "type": "number"
         },
         "lambda": {
-          "default": 0.6,
+          "default": 0.5,
           "description": "Exponent \u03bb of the phase-2 discount on busy segments.",
           "title": "Lambda",
           "type": "number"
@@ -512,7 +512,7 @@
           "type": "array"
         },
         "intra_zone_min_miles": {
-          "default": 25.0,
+          "default": 30.0,
           "description": "Intra-zone FAF rows averaging fewer miles (FAF5) are local switching and dropped; rows with no FAF5 distance are kept.",
           "title": "Intra Zone Min Miles",
           "type": "number"
@@ -591,7 +591,7 @@
           "type": "number"
         },
         "mip_gap": {
-          "default": 0.02,
+          "default": 0.01,
           "description": "Relative gap at which a category's solve stops.",
           "title": "Mip Gap",
           "type": "number"
@@ -656,7 +656,7 @@
           "type": "number"
         },
         "distance_tolerance": {
-          "default": 0.15,
+          "default": 0.4,
           "description": "Between two zones, yard pairs whose route cost is over (1 + this) x the cheapest are left out.",
           "title": "Distance Tolerance",
           "type": "number"
@@ -669,7 +669,7 @@
           "type": "integer"
         },
         "min_route_km": {
-          "default": 40.0,
+          "default": 50.0,
           "description": "Local-train distance (km). Inter-zone: yard pairs with a shorter route are not candidates; a zone pair with none left is dropped. Intra-zone: tons whose assigned yard pair is shorter are dropped.",
           "minimum": 0,
           "title": "Min Route Km",

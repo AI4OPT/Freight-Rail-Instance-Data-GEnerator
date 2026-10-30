@@ -11,6 +11,9 @@ from railgen.scenario_gen.distribution_groupings import (
 )
 from railgen.scenario_gen.distributions import (
     AsymmetricLaplace,
+    LogNormalDist,
+    Mixture,
+    MixtureComponent,
     NormalDist,
     WeibullDist,
 )
@@ -49,16 +52,39 @@ def test_default_scenario_config_resolves_for_every_category():
     assert cfg == ScenarioGenerationConfig()
     for category in TrainCategory:
         assert cfg.train_distributions_for(category) == TrainDistributions(
-            initial_departure=WeibullDist(distr_type="weibull", shape=1, scale=60),
-            trip_time_percent_diff=WeibullDist(distr_type="weibull", shape=1, scale=5),
-            dwell_time=WeibullDist(distr_type="weibull", shape=1, scale=15),
+            initial_departure=Mixture(
+                distr_type="mixture",
+                components=[
+                    MixtureComponent(
+                        weight=0.4,
+                        negate=True,
+                        distribution=WeibullDist(
+                            distr_type="weibull", shape=1, scale=86.6
+                        ),
+                    ),
+                    MixtureComponent(
+                        weight=0.6,
+                        distribution=WeibullDist(
+                            distr_type="weibull", shape=0.5, scale=30
+                        ),
+                    ),
+                ],
+            ),
+            trip_time_percent_diff=LogNormalDist(
+                distr_type="log_normal", location=-20, log_mean=3, log_stdev=0.32
+            ),
+            dwell_time=LogNormalDist(
+                distr_type="log_normal", location=-40, log_mean=3.85, log_stdev=0.4
+            ),
         )
 
 
 def test_overrides_layer_over_defaults_per_entry():
     cfg = load_scenario_yaml(SCENARIO_OVERRIDES)
     jittery = NormalDist(distr_type="normal", mean=0, stdev=45)
-    default_dwell = WeibullDist(distr_type="weibull", shape=1, scale=15)
+    default_dwell = LogNormalDist(
+        distr_type="log_normal", location=-40, log_mean=3.85, log_stdev=0.4
+    )
 
     assert cfg.train_distributions_for(TrainCategory.A).initial_departure == jittery
     assert cfg.train_distributions_for(TrainCategory.A).dwell_time == default_dwell

@@ -43,7 +43,7 @@ This downloads required public data (NTAD rail yards and rail lines, FAF6 freigh
 
 FRIDGE has two stages: schedule generation and scenario generation. A schedule represents a weekly train plan, while a scenario represents a simulated realization of a schedule with early or late departures and arrivals.
 
-An example instance, one schedule (train seed 39) and 50 scenarios of it, is in [`output/example_output/`](output/example_output/).
+Example instances are in [`output/example_output/`](output/example_output/): one schedule (train seed 42) and 50 scenarios of it (seed 42) for the full network (`full/`) and for the eastern (`east/`) and western (`west/`) regions.
 
 ## Schedule generation
 
