@@ -153,12 +153,16 @@ def test_returns_are_picked_where_they_help_most_and_never_when_they_hurt():
 
 def _with_returns(settings: ServiceDesignSettings, **shares) -> ServiceDesignSettings:
     return settings.model_copy(
-        update={"circuitous_trains": CircuitousTrains.model_validate(shares)}
+        update={
+            "circuitous_trains": CircuitousTrains.model_validate(
+                {"short_empty_returns": {}, "long_empty_returns": {}, **shares}
+            )
+        }
     )
 
 
 def test_short_train_comes_back_only_under_the_short_share():
-    train, service, network, settings = _coal_train(40.0)  # 180 km: short (225 mi)
+    train, service, network, settings = _coal_train(40.0)  # 180 km: short (200 mi)
     service_of = {train.symbol: service}
     short = _with_returns(settings, short_empty_returns={"B": 1.0})
     (back,), lines = add_circuitous_trains([train], service_of, network, short)

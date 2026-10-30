@@ -1,0 +1,237 @@
+general_settings:
+  train_seed: 42
+  data_output_dir: output
+  seg_freq_arc_cost_discount_alpha: 0.3
+  lambda: 0.5
+  median_f: 12.0
+network_settings:
+  hub_locations:
+  - city: Portland
+    state: OR
+  - city: Seattle
+    state: WA
+  - city: Oakland
+    state: CA
+  - city: Los Angeles
+    state: CA
+  - city: Salt Lake City
+    state: UT
+  - city: Kansas City
+    state: MO
+  - city: Fort Worth
+    state: TX
+  - city: Houston
+    state: TX
+  - city: Minneapolis
+    state: MN
+  - city: Chicago
+    state: IL
+  - city: Memphis
+    state: TN
+  - city: New Orleans
+    state: LA
+  - city: San Antonio
+    state: TX
+  - city: Pittsburgh
+    state: PA
+  - city: Secaucus
+    state: NJ
+  - city: Birmingham
+    state: AL
+  - city: Atlanta
+    state: GA
+  - city: Norfolk
+    state: VA
+  - city: Baltimore
+    state: MD
+  - city: Detroit
+    state: MI
+  - city: St. Louis
+    state: MO
+  - city: Omaha
+    state: NE
+  - city: North Platte
+    state: NE
+  - city: Denver
+    state: CO
+  - city: El Paso
+    state: TX
+  - city: Spokane
+    state: WA
+  - city: Jacksonville
+    state: FL
+  - city: Cincinnati
+    state: OH
+  - city: Buffalo
+    state: NY
+  - city: Laredo
+    state: TX
+  hub_radius_km: 50.0
+  yds_per_zone: 3
+  min_od_yd_spacing_km: 5.0
+  min_od_yd_track_km: 2.0
+  excluded_track_net_codes:
+  - A
+  - R
+  - X
+  - T
+  - F
+  max_connection_km: 800.0
+  od_discount_factor: 0.7
+  per_grade_speed_reduction: 0.1
+  max_speed_reduction: 0.5
+train_settings:
+  speed_km_h: 40
+  speed_km_h_by_category:
+    A: 40.0
+    M: 36.0
+    B: 38.0
+    I: 50.0
+service_design_settings:
+  multimodal_rail_share: 0.5
+  multimodal_min_miles: 500.0
+  multimodal_max_miles: 2500.0
+  region:
+    instance: full
+    west_states:
+    - MN
+    - IA
+    - MO
+    - AR
+    - LA
+    - WI
+    - ND
+    - SD
+    - NE
+    - KS
+    - OK
+    - TX
+    - MT
+    - WY
+    - CO
+    - NM
+    - ID
+    - UT
+    - AZ
+    - WA
+    - OR
+    - NV
+    - CA
+    - AK
+    - HI
+    gateway_zones:
+    - '171'
+    - '181'
+    - '172'
+    - '292'
+    - '201'
+    - '291'
+    - '471'
+    - '223'
+    gateway_radius_km: 25.0
+  excluded_zones:
+  - '020'
+  freight_groups:
+    coal:
+    - '15'
+    grain:
+    - '02'
+    ores_minerals:
+    - '13'
+    - '14'
+    aggregates:
+    - '10'
+    - '11'
+    - '12'
+    petroleum_energy:
+    - '16'
+    - '17'
+    - '18'
+    - '19'
+    automotive:
+    - '36'
+    - '37'
+  shared_bulk: true
+  train_type_category:
+    coal: B
+    grain: B
+    ores_minerals: B
+    aggregates: B
+    petroleum_energy: B
+    manifest: M
+    automotive: A
+    intermodal: I
+  excluded_flows: []
+  intra_zone_min_miles: 30.0
+  min_od_tons_per_week:
+    A: 1600.0
+    M: 9000.0
+    B: 13000.0
+    I: 7400.0
+  yard_pairs:
+    assignment: one_per_category
+    tonnage_step: 11000.0
+    distance_tolerance: 0.4
+    max_pairs: 3
+    min_route_km: 50.0
+  work_yards_per_state: 3
+  max_trailing_tons_per_run_by_category:
+    A: 6500.0
+    M: 13000.0
+    B: 17000.0
+    I: 12000.0
+  max_runs_per_week: 7
+  max_symbols_per_service: 3
+  costs:
+    train_start: 500.0
+    per_train_mile: 0.5
+    per_distinct_train: 10000.0
+    transfer_fixed: 50.0
+    transfer_per_ton: 0.1
+  crew:
+    duty_hours: 12.0
+    terminal_hours: 0.0
+    merge_with_work_stop_minutes: 15.0
+  dwell_minutes:
+    crew_only: 20.0
+    so: 30.0
+    pu: 60.0
+    pu_so: 90.0
+    so_crew: 70.0
+    pu_crew: 80.0
+    pu_so_crew: 140.0
+  car_weight:
+    empty_car_tons_by_category:
+      A: 53.0
+      M: 33.0
+      B: 29.0
+      I: 31.0
+    cargo_tons_per_car_by_category:
+      A: 18.0
+      M: 82.5
+      B: 100.0
+      I: 50.0
+  locomotive_power:
+    locomotive_hp: 4400.0
+    hp_per_ton_by_category:
+      A: 1.4
+      M: 1.5
+      B: 0.78
+      I: 1.9
+    rolling_resistance_lb_per_ton: 2.0
+    min_speed_mph: 10.0
+    transmission_efficiency: 0.82
+    grade_window_km: 10.0
+  circuitous_trains:
+    short_empty_returns:
+      A: 1.0
+      M: 1.0
+      B: 1.0
+      I: 1.0
+    long_empty_returns:
+      B: 1.0
+    short_max_miles: 200.0
+  solver:
+    time_limit_s: 600.0
+    mip_gap: 0.01
+    log_file: gurobi_service_design.log

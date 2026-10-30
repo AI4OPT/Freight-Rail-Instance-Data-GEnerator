@@ -1,0 +1,37 @@
+general_settings:
+  seed: 42
+  scenario_count: 50
+  minimum_dwell_share: 0.75
+distributions_pool: {}
+default_distributions:
+  initial_departure:
+    distr_type: mixture
+    components:
+    - weight: 0.4
+      negate: true
+      distribution:
+        distr_type: weibull
+        shape: 1.0
+        scale: 86.6
+        location: 0.0
+    - weight: 0.6
+      negate: false
+      distribution:
+        distr_type: weibull
+        shape: 0.5
+        scale: 30.0
+        location: 0.0
+  trip_time_percent_diff:
+    distr_type: log_normal
+    log_mean: 3.0
+    log_stdev: 0.32
+    location: -20.0
+  dwell_time:
+    distr_type: log_normal
+    log_mean: 3.85
+    log_stdev: 0.4
+    location: -40.0
+train_category_distributions_overrides: {}
+yard_dwell_distributions: {}
+leg_trip_time_percent_diff_distributions: {}
+region_distributions: []

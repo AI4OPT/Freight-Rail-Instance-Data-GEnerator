@@ -9,7 +9,13 @@ from pydantic.json_schema import SkipJsonSchema
 
 from railgen.models import Coord, Location, TrainCategory, YdKey
 from railgen.scenario_gen.distribution_groupings import TrainDistributions
-from railgen.scenario_gen.distributions import ScenarioDistribution, WeibullDist
+from railgen.scenario_gen.distributions import (
+    LogNormalDist,
+    Mixture,
+    MixtureComponent,
+    ScenarioDistribution,
+    WeibullDist,
+)
 from railgen.schedule_gen.schedule_config import CONFIGS_DIR
 
 SCENARIO_CONFIG_FILE_PATH = CONFIGS_DIR / "scenario_config.yaml"
@@ -24,7 +30,7 @@ class ScenarioGeneralConfig(BaseModel):
         None,
         description="Value used to seed random scenario generation. Null means a fresh random seed on every run.",
     )
-    scenario_count: int = Field(10, description="Number of scenarios to generate.")
+    scenario_count: int = Field(50, description="Number of scenarios to generate.")
     minimum_dwell_share: float = Field(
         0.75,
         ge=0.0,
@@ -35,25 +41,40 @@ class ScenarioGeneralConfig(BaseModel):
     model_config: ClassVar[ConfigDict] = _CONFIG_MODEL_MUTABLE
 
 
-def _exponential(mean: float) -> WeibullDist:
-    """Exponential distribution (Weibull with shape 1), the most common model of train delays."""
-    return WeibullDist(distr_type="weibull", shape=1.0, scale=mean)
-
-
 class Distributions(BaseModel):
-    """Each dist is either a fully defined distribution or the name of a predefined distribution.
-    Defaults are exponential with illustrative means: delays only, never early."""
+    """Each dist is either a fully defined distribution or the name of a predefined distribution."""
 
     initial_departure: ScenarioDistribution | str = Field(
-        default_factory=lambda: _exponential(60.0),
+        default_factory=lambda: Mixture(
+            distr_type="mixture",
+            components=[
+                MixtureComponent(  # early: exponential, mean 86.6 = 60 / ln 2
+                    weight=0.4,
+                    negate=True,
+                    distribution=WeibullDist(
+                        distr_type="weibull", shape=1.0, scale=86.6
+                    ),
+                ),
+                MixtureComponent(  # late: median 30 * ln(2)^2 = 14
+                    weight=0.6,
+                    distribution=WeibullDist(
+                        distr_type="weibull", shape=0.5, scale=30.0
+                    ),
+                ),
+            ],
+        ),
         description="Minutes between a train's scheduled and actual first departure.",
     )
     trip_time_percent_diff: ScenarioDistribution | str = Field(
-        default_factory=lambda: _exponential(5.0),
+        default_factory=lambda: LogNormalDist(
+            distr_type="log_normal", location=-20.0, log_mean=3.0, log_stdev=0.32
+        ),
         description="Percentage difference between actual run time of a trip leg and its scheduled run time.",
     )
     dwell_time: ScenarioDistribution | str = Field(
-        default_factory=lambda: _exponential(15.0),
+        default_factory=lambda: LogNormalDist(
+            distr_type="log_normal", location=-40.0, log_mean=3.85, log_stdev=0.40
+        ),
         description="Dwell change in minutes at a stop, added to the planned dwell less any recovery. Positive is new delay; negative shortens the stop, never below the minimum dwell.",
     )
 

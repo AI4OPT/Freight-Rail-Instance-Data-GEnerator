@@ -936,6 +936,8 @@ def test_transfer_cost_stops_a_relay():
     def solve(fixed: float, per_ton: float, per_distinct_train: float = 0.0):
         settings = ServiceDesignSettings(
             costs=Costs(
+                train_start=400.0,
+                per_train_mile=10.0,
                 transfer_fixed=fixed,
                 transfer_per_ton=per_ton,
                 per_distinct_train=per_distinct_train,
