@@ -11,12 +11,12 @@ default_distributions:
     components:
       - weight: 0.40
         negate: true # drawn as minutes early
-        distribution: # exponential, mean 86.6 = 60 / ln 2
+        distribution: 
           distr_type: weibull
           shape: 1.0
           scale: 86.6
       - weight: 0.60
-        distribution: # median 30 * ln(2)^2 = 14
+        distribution:
           distr_type: weibull
           shape: 0.5
           scale: 30.0
