@@ -74,6 +74,29 @@ A `region_distributions` entry has a `center` (`{lat, lon}`, or `{city, state}` 
 
 Independent samples add means and variances: stdev 5 on a yard plus stdev 5 on the category gives about 7.
 
+### Time Bounds
+
+Any distribution, inline or in `distributions_pool`, can take `time_bounds`: a list of windows of the week in which it is sampled. Outside all of them it adds 0. For example, extra dwell at one yard during the day on Monday and Friday:
+
+```yaml
+yard_dwell_distributions:
+  NORRIS-1644:
+    distr_type: normal
+    mean: 30
+    stdev: 10
+    time_bounds:
+      - start: { day: mon, hour_min: "06:00" }
+        end: { day: mon, hour_min: "18:00" }
+      - start: { day: fri, hour_min: "06:00" }
+        end: { day: fri, hour_min: "18:00" }
+```
+
+- `day` is `mon`, `tue`, `wed`, `thu`, `fri`, `sat` or `sun`. Full names and `m`, `tu`, `w`, `th`, `f`, `sa`, `su` also work. `hour_min` is 24-hour `HH:MM`.
+- In each window `start` is included and `end` is not. Both fall within one week, Monday 00:00 to Sunday 23:59, and `start` must come before `end`. A window cannot cross Sunday midnight. A trip that runs past Sunday midnight is checked against the same windows in the next week. Windows may overlap.
+- The time checked is the train's day of week and time of day at the event: the scheduled departure for the first departure delay, the actual departure for a leg's run time change, and the actual arrival at the stop for a dwell change.
+- The place sample adds to the train sample. A bounded yard, leg or region distribution adds its delay on top of the category's only during its windows. Outside its windows, a bounded category distribution gives 0 and only the place sample remains.
+- A mixture takes one `time_bounds` list for all its components. A component cannot have its own.
+
 ### Walking the Route
 
 A clock starts at the first scheduled departure.

@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
 
+import yaml
 from test_schedule_input import TRAINS, write_schedule
 from typer.testing import CliRunner
 
 from cli.main import app
-from railgen.models import TrainCategory, Week, YdKey
+from railgen.models import DayOfWeek, TrainCategory, Week, YdKey
 from railgen.scenario_gen.distribution_groupings import YardDistributions
 from railgen.scenario_gen.scenario_config import ScenarioGenerationConfig
 from railgen.scenario_gen.scenario_generation import (
@@ -63,9 +64,14 @@ def _train(*legs: tuple[str, int, int], days: Week[bool] = WEEKDAYS) -> Schedule
     )
 
 
-def _simulate(train: ScheduledTrain, cfg: ScenarioGenerationConfig):
+def _simulate(
+    train: ScheduledTrain,
+    cfg: ScenarioGenerationConfig,
+    day: DayOfWeek = DayOfWeek.MONDAY,
+):
     return simulate_day(
         train,
+        day=day,
         train_dists=cfg.train_distributions_for(TrainCategory.A),
         yd_dists=YardDistributions(leg_distributions={}, yd_dwell_distributions={}),
         min_dwell_share=0.75,
@@ -102,6 +108,28 @@ def test_early_train_is_not_held_and_dwell_never_below_minimum():
     assert _simulate(train, _cfg(dwell=7))["R2"] == Sample(
         dep_min_delta=7, arvl_min_delta=7
     )
+
+
+def test_time_bounds_follow_the_running_day():
+    cfg = ScenarioGenerationConfig.model_validate(
+        yaml.safe_load("""
+default_distributions:
+  initial_departure: {distr_type: normal, mean: 0, stdev: 0}
+  trip_time_percent_diff: {distr_type: normal, mean: 0, stdev: 0}
+  dwell_time:
+    distr_type: normal
+    mean: 7
+    stdev: 0
+    time_bounds:
+      - {start: {day: tue, hour_min: 12:00}, end: {day: tue, hour_min: 18:00}}
+      - {start: {day: thu, hour_min: 12:00}, end: {day: thu, hour_min: 18:00}}
+""")
+    )
+    # Arrives at the R2 stop at 15:00.
+    train = _train(("R1", 600, 900), ("R2", 960, 1200))
+    assert _simulate(train, cfg, DayOfWeek.TUESDAY)["R2"].dep_min_delta == 7
+    assert _simulate(train, cfg, DayOfWeek.THURSDAY)["R2"].dep_min_delta == 7
+    assert _simulate(train, cfg, DayOfWeek.MONDAY)["R2"].dep_min_delta == 0
 
 
 def test_generate_scenario_only_fills_active_days():

@@ -2,6 +2,14 @@
   "$defs": {
     "AsymmetricLaplace": {
       "properties": {
+        "time_bounds": {
+          "description": "Time ranges, each with a 'start' and 'end', during which this distribution is applied. Empty applies at all times.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "title": "Time Bounds",
+          "type": "array"
+        },
         "distr_type": {
           "const": "asymmetric_laplace",
           "title": "Distr Type",
@@ -172,6 +180,14 @@
     "LogNormalDist": {
       "description": "`location` + exp(N(`log_mean`, `log_stdev`)); never below `location`.",
       "properties": {
+        "time_bounds": {
+          "description": "Time ranges, each with a 'start' and 'end', during which this distribution is applied. Empty applies at all times.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "title": "Time Bounds",
+          "type": "array"
+        },
         "distr_type": {
           "const": "log_normal",
           "title": "Distr Type",
@@ -203,6 +219,14 @@
     "Mixture": {
       "description": "Picks one component with probability `weight`, then draws from it.",
       "properties": {
+        "time_bounds": {
+          "description": "Time ranges, each with a 'start' and 'end', during which this distribution is applied. Empty applies at all times.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "title": "Time Bounds",
+          "type": "array"
+        },
         "distr_type": {
           "const": "mixture",
           "title": "Distr Type",
@@ -251,6 +275,14 @@
     },
     "NormalDist": {
       "properties": {
+        "time_bounds": {
+          "description": "Time ranges, each with a 'start' and 'end', during which this distribution is applied. Empty applies at all times.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "title": "Time Bounds",
+          "type": "array"
+        },
         "distr_type": {
           "const": "normal",
           "title": "Distr Type",
@@ -397,6 +429,46 @@
       "title": "ScenarioGeneralConfig",
       "type": "object"
     },
+    "Time": {
+      "description": "Represents a specific time in the schedule week.",
+      "properties": {
+        "day": {
+          "description": "Day of the week. Use 'mon', 'tue', etc.",
+          "type": "string"
+        },
+        "hour_min": {
+          "description": "Time of day in HH:MM format (00:00 - 23:59).",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "title": "Hour Min",
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "hour_min"
+      ],
+      "title": "Time",
+      "type": "object"
+    },
+    "TimeBound": {
+      "description": "A range of time in the schedule week during which a distribution is applied.",
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/Time",
+          "description": "Start of the time bound."
+        },
+        "end": {
+          "$ref": "#/$defs/Time",
+          "description": "End of the time bound."
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "TimeBound",
+      "type": "object"
+    },
     "TrainCategory": {
       "description": "Category a train symbol belongs to.",
       "enum": [
@@ -411,6 +483,14 @@
     "WeibullDist": {
       "description": "`location` + `scale` x a standard Weibull draw; never below `location`.",
       "properties": {
+        "time_bounds": {
+          "description": "Time ranges, each with a 'start' and 'end', during which this distribution is applied. Empty applies at all times.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "title": "Time Bounds",
+          "type": "array"
+        },
         "distr_type": {
           "const": "weibull",
           "title": "Distr Type",

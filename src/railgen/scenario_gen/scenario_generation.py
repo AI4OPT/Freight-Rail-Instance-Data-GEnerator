@@ -13,10 +13,7 @@ from railgen.scenario_gen.distribution_groupings import (
     TrainDistributions,
     YardDistributions,
 )
-from railgen.scenario_gen.distributions import (
-    ScenarioDistribution,
-    sample_distribution,
-)
+from railgen.scenario_gen.distributions import ScenarioDistribution
 from railgen.scenario_gen.scenario_config import ScenarioGenerationConfig
 from railgen.scenario_gen.schedule_input import ScheduledTrain
 from railgen.schedule_gen.attributes import TrainSymbol
@@ -95,6 +92,7 @@ def process_train(
         for _ in range(config.general_settings.scenario_count):
             simulation = simulate_day(
                 train,
+                day=day,
                 rng=rng,
                 train_dists=dists,
                 yd_dists=yd_dists,
@@ -112,18 +110,21 @@ def train_day_rng(seed: int, symbol: TrainSymbol, day: DayOfWeek) -> Generator:
     Each train and day has its own sequence, so a train's samples do not depend on the other
     trains in the schedule or on how many numbers they draw.
     """
-    return numpy.random.default_rng([seed, int.from_bytes(symbol.encode()), day.value])
+    return numpy.random.default_rng(
+        [seed, int.from_bytes(symbol.encode()), day.to_day_int()]
+    )
 
 
 def simulate_day(
     train: ScheduledTrain,
     *,
+    day: DayOfWeek,
     rng: Generator | None = None,
     train_dists: TrainDistributions,
     yd_dists: YardDistributions,
     min_dwell_share: float,
 ) -> dict[TrainRowID, Sample]:
-    """Simulates a train's full trip on one day. Without `rng`, draws from an unseeded generator."""
+    """Simulates a train's full trip on one running day. Without `rng`, draws from an unseeded generator."""
 
     if rng is None:
         rng = numpy.random.default_rng()
@@ -138,10 +139,13 @@ def simulate_day(
     running_time_actual_minutes = (
         first_trip.dep_minute  # starts at the schedule departure
     )
+    # Trip minutes count from midnight of the running day; time bounds count from Monday 00:00
+    week_start = (day.to_day_int() - 1) * MINUTES_PER_DAY
 
     dep_delta = add_samples(
         train_dists.initial_departure,
         yd_dists.yd_dwell_distributions.get(first_trip.bgn_yd),
+        week_start + running_time_actual_minutes,
         rng,
     )
 
@@ -151,6 +155,7 @@ def simulate_day(
         add_samples(
             train_dists.trip_time_percent_diff,
             yd_dists.leg_distributions.get((first_trip.bgn_yd, first_trip.end_yd)),
+            int(week_start + running_time_actual_minutes),
             rng,
         )
         # This comes back as a percentage so divide by 100 to get a scalar
@@ -174,6 +179,7 @@ def simulate_day(
         extra_dwell_mins = add_samples(
             train_dists.dwell_time,
             yd_dists.yd_dwell_distributions.get(prev_trip.end_yd),
+            int(week_start + running_time_actual_minutes),
             rng,
         )
         arrival_delay = running_time_actual_minutes - prev_trip.arvl_minute
@@ -192,6 +198,7 @@ def simulate_day(
             add_samples(
                 train_dists.trip_time_percent_diff,
                 yd_dists.leg_distributions.get((cur_trip.bgn_yd, cur_trip.end_yd)),
+                int(week_start + running_time_actual_minutes),
                 rng,
             )
             / 100
@@ -216,9 +223,11 @@ def simulate_day(
 def add_samples(
     train_dist: ScenarioDistribution,
     yd_dist: ScenarioDistribution | None,
+    minute: int,
     rng: Generator,
 ) -> float:
     """Combine train distribution sample and yard distribution sample."""
-    return sample_distribution(train_dist, rng) + (
-        sample_distribution(yd_dist, rng) if yd_dist else 0
+
+    return (train_dist.sample(rng, minute) or 0) + (
+        (yd_dist.sample(rng, minute) or 0) if yd_dist else 0
     )

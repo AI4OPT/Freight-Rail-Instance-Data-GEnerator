@@ -48,6 +48,31 @@ class DayOfWeek(Enum):
     SATURDAY = 6
     SUNDAY = 7
 
+    @staticmethod
+    def from_str(day_str: str) -> "DayOfWeek | None":
+        """Parse DayOfWeek from a string. Returns None if the string does not match any day."""
+        match day_str.lower():
+            case "m" | "mon" | "monday":
+                return DayOfWeek.MONDAY
+            case "tu" | "tue" | "tuesday":
+                return DayOfWeek.TUESDAY
+            case "w" | "wed" | "wednesday":
+                return DayOfWeek.WEDNESDAY
+            case "th" | "thu" | "thursday":
+                return DayOfWeek.THURSDAY
+            case "f" | "fri" | "friday":
+                return DayOfWeek.FRIDAY
+            case "sa" | "sat" | "saturday":
+                return DayOfWeek.SATURDAY
+            case "su" | "sun" | "sunday":
+                return DayOfWeek.SUNDAY
+            case _:
+                return None
+
+    def to_day_int(self) -> int:
+        """Converts the DayOfWeek enum to an integer representation (1 for Monday, 7 for Sunday)."""
+        return int(self.value)
+
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class Week[T]:
