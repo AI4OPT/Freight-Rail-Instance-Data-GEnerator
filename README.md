@@ -128,19 +128,16 @@ uv run fridge schedule --config other-config.yaml
 
 CLI flags win over the configuration file, which wins over the built-in defaults.
 
-## Development
-
-```sh
-uv run pytest      # tests
-uv run ty check    # type checking
-uv run ruff check  # linting and formatting
-```
-
 ## Further documentation
 
 - Settings and their defaults: `configs/`, `src/railgen/schedule_gen/schedule_config.py`, `src/railgen/scenario_gen/scenario_config.py`.
 - How schedules are generated: [`src/railgen/schedule_gen/README.md`](src/railgen/schedule_gen/README.md).
 - How scenarios are generated: [`src/railgen/scenario_gen/README.md`](src/railgen/scenario_gen/README.md).
+
+## Development & Contributing
+
+For information on reporting bugs or suggesting features, see [CONTRIBUTING](CONTRIBUTING.md).
+For information on reporting security vulnerabilities, see [SECURITY](SECURITY.md).
 
 ---
 
