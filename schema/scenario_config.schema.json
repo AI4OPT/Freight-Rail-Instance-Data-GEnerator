@@ -469,6 +469,41 @@
       "title": "TimeBound",
       "type": "object"
     },
+    "TrackOutage": {
+      "description": "Used to model a temporarily unavailable track segment connecting two yards.\nThis can be used to simulate events like track maintenance, weather events, bridge collapses, etc.",
+      "properties": {
+        "yards": {
+          "description": "Pair of yards between which the track outage occurs. The outage is applied in both directions.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Yards",
+          "type": "array"
+        },
+        "time_bounds": {
+          "description": "List of time ranges during which the outage occurs.",
+          "items": {
+            "$ref": "#/$defs/TimeBound"
+          },
+          "minItems": 1,
+          "title": "Time Bounds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "yards",
+        "time_bounds"
+      ],
+      "title": "TrackOutage",
+      "type": "object"
+    },
     "TrainCategory": {
       "description": "Category a train symbol belongs to.",
       "enum": [
@@ -607,6 +642,14 @@
       "description": "Per-one-way-leg (origin -> destination) trip time percent difference.",
       "title": "Leg Trip Time Percent Diff Distributions",
       "type": "object"
+    },
+    "track_outages": {
+      "description": "Apply temporary outages to yard connections. This can be used to simulate events like track maintenance, weather events, bridge collapses, etc.",
+      "items": {
+        "$ref": "#/$defs/TrackOutage"
+      },
+      "title": "Track Outages",
+      "type": "array"
     },
     "region_distributions": {
       "description": "Distributions applied to all yards within a radius of a location. A yard or leg may only get a distribution from one source.",

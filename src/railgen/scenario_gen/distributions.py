@@ -1,86 +1,19 @@
 import math
 from abc import ABC, abstractmethod
-from functools import cached_property
 from typing import Annotated, Literal, Self
 
 from numpy.random import Generator
 from pydantic import (
     BaseModel,
     Field,
-    field_serializer,
-    field_validator,
     model_validator,
 )
 from scipy.stats import laplace_asymmetric
 
-from railgen.models import DayOfWeek
+from railgen.scenario_gen.time import TimeBound
 from railgen.utils import (
-    MINUTES_PER_DAY,
-    MINUTES_PER_HOUR,
     MINUTES_PER_WEEK,
-    HourMinute,
 )
-
-
-class Time(BaseModel):
-    """Represents a specific time in the schedule week."""
-
-    day: DayOfWeek = Field(description="Day of the week. Use 'mon', 'tue', etc.")
-    hour_min: HourMinute = Field(
-        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
-        description="Time of day in HH:MM format (00:00 - 23:59).",
-    )
-
-    @field_validator("day", mode="before", json_schema_input_type=str)
-    @classmethod
-    def _parse_day(cls, value: object) -> DayOfWeek:
-        if isinstance(value, DayOfWeek):
-            return value
-        if (day := DayOfWeek.from_str(str(value))) is None:
-            raise ValueError(f"Invalid day of week: {value}")
-        return day
-
-    @field_serializer("day")
-    def _serialize_day(self, day: DayOfWeek) -> str:
-        return day.name[:3].lower()
-
-    @field_validator("hour_min", mode="before")
-    @classmethod
-    def _parse_hour_min(cls, value: object) -> object:
-        # YAML 1.1 reads unquoted 10:00 to 23:59 as base 60 ints, e.g. 12:30 -> 750
-        return (
-            f"{value // 60:02d}:{value % 60:02d}" if isinstance(value, int) else value
-        )
-
-    def minute_of_week(self) -> int:
-        hour, minute = map(int, self.hour_min.split(":"))
-        return (
-            (self.day.to_day_int() - 1) * MINUTES_PER_DAY
-            + hour * MINUTES_PER_HOUR
-            + minute
-        )
-
-
-class TimeBound(BaseModel):
-    """A range of time in the schedule week during which a distribution is applied."""
-
-    start: Time = Field(description="Start of the time bound.")
-    end: Time = Field(description="End of the time bound.")
-
-    @model_validator(mode="after")
-    def _validate_bound(self) -> Self:
-        start_min, end_min = self.as_minutes()
-        if start_min >= end_min:
-            raise ValueError("start time must be before end time in TimeBound")
-        return self
-
-    @cached_property
-    def _mins(self) -> tuple[int, int]:
-        return self.start.minute_of_week(), self.end.minute_of_week()
-
-    def as_minutes(self) -> tuple[int, int]:
-        """Returns the start and end times as minutes since Monday 00:00."""
-        return self._mins
 
 
 class Distribution(BaseModel, ABC):

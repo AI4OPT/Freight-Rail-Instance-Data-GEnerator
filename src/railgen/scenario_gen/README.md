@@ -44,6 +44,11 @@ region_distributions:
   - center: { city: Chicago, state: IL }
     radius_km: 50
     dwell_time: congested
+track_outages:
+  - yards: [NEW BOYLES-943, NORRIS-1644]
+    time_bounds:
+      - start: { day: tue, hour_min: "08:00" }
+        end: { day: tue, hour_min: "14:00" }
 ```
 
 Every distribution named must exist in `distributions_pool`, and every yard key must have the form `YARDNAME-OBJECTID`. Each train and running day gets its own random generator, seeded from (seed, train symbol, day), so a train's samples do not depend on the other trains. The saved config holds the seed and count actually used.
@@ -97,12 +102,22 @@ yard_dwell_distributions:
 - The place sample adds to the train sample. A bounded yard, leg or region distribution adds its delay on top of the category's only during its windows. Outside its windows, a bounded category distribution gives 0 and only the place sample remains.
 - A mixture takes one `time_bounds` list for all its components. A component cannot have its own.
 
+### Track Outages
+
+Users may define _track outages_ in the scenario configuration file that close a connection between two yard for some period of time. This can be used to model maintenance periods, weather events, bridge closures, or other similar events. The example config in [Step 1](#step-1-config-and-seed-scenario_configpy) closes the track between NEW BOYLES-943 and NORRIS-1644 on Tuesday from 08:00 to 14:00.
+
+Things to note:
+
+- An outage applies in both directions and only to legs that begin at one of the two yards and end at the other. Legs that pass through the closed section without starting and ending at those yards are not affected.
+- If a train is already travelling on a given track when an outage begins, it waits on place until the outage ends and continues its journey. The resultant travel delay is added to the segment's arrival delay.
+- The wait can push a train into later outages on the same leg, and it waits for those too. Overlapping windows, from one entry or several, count once. Windows repeat every week, so a leg that runs past Sunday midnight meets the next week's outages.
+
 ### Walking the Route
 
 A clock starts at the first scheduled departure.
 
 1. **First departure:** add the departure delay.
-2. **Each leg:** add `planned_run_time × (1 + run_time_change / 100)`; this gives the actual arrival.
+2. **Each leg:** add `planned_run_time × (1 + run_time_change / 100)`, plus any time stopped for track outages; this gives the actual arrival.
 3. **Each intermediate stop:** the planned dwell is a minimum dwell (`general_settings.minimum_dwell_share` × planned, the work at the stop) plus a buffer (the rest). The actual dwell is `max(minimum_dwell, max(minimum_dwell, planned_dwell − max(arrival_delay, 0)) + extra_dwell)`:
    - a late train uses the buffer to recover, all of its delay if the buffer is large enough;
    - an early train is not held and dwells the planned time;

@@ -16,6 +16,7 @@ from railgen.scenario_gen.distributions import (
     ScenarioDistribution,
     WeibullDist,
 )
+from railgen.scenario_gen.track_outage import TrackOutage
 from railgen.schedule_gen.schedule_config import CONFIGS_DIR
 
 SCENARIO_CONFIG_FILE_PATH = CONFIGS_DIR / "scenario_config.yaml"
@@ -144,6 +145,10 @@ class ScenarioGenerationConfig(BaseModel):
     ] = Field(
         default_factory=dict,
         description="Per-one-way-leg (origin -> destination) trip time percent difference.",
+    )
+    track_outages: list[TrackOutage] = Field(
+        default_factory=list,
+        description="Apply temporary outages to yard connections. This can be used to simulate events like track maintenance, weather events, bridge collapses, etc.",
     )
     region_distributions: list[RegionDistributions] = Field(
         default_factory=list,

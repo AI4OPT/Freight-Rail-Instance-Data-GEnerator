@@ -33,4 +33,5 @@ default_distributions:
 train_category_distributions_overrides: {}
 yard_dwell_distributions: {}
 leg_trip_time_percent_diff_distributions: {}
+track_outages: []
 region_distributions: []

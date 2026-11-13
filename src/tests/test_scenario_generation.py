@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import numpy
 import yaml
 from test_schedule_input import TRAINS, write_schedule
 from typer.testing import CliRunner
@@ -15,6 +16,8 @@ from railgen.scenario_gen.scenario_generation import (
     simulate_day,
 )
 from railgen.scenario_gen.schedule_input import ScheduledTrain, ScheduledTripLeg
+from railgen.scenario_gen.time import SimulationMinute, TimeBound
+from railgen.scenario_gen.track_outage import TrackOutage, determine_outage_delay
 from railgen.scenario_gen.yard_resolution import (
     resolve_yard_distributions,
 )
@@ -72,8 +75,10 @@ def _simulate(
     return simulate_day(
         train,
         day=day,
+        rng=numpy.random.default_rng(),
         train_dists=cfg.train_distributions_for(TrainCategory.A),
         yd_dists=YardDistributions(leg_distributions={}, yd_dwell_distributions={}),
+        outages=[],
         min_dwell_share=0.75,
     )
 
@@ -130,6 +135,33 @@ default_distributions:
     assert _simulate(train, cfg, DayOfWeek.TUESDAY)["R2"].dep_min_delta == 7
     assert _simulate(train, cfg, DayOfWeek.THURSDAY)["R2"].dep_min_delta == 7
     assert _simulate(train, cfg, DayOfWeek.MONDAY)["R2"].dep_min_delta == 0
+
+
+def test_track_outage_delay():
+    yd_a, yd_b = YdKey.from_raw_str("A-1"), YdKey.from_raw_str("B-2")
+    time = lambda s: dict(zip(("day", "hour_min"), s.split()))
+
+    # 180 min trip from B to A, leaving Monday 09:00 by default
+    def delay(start: str, end: str, day: DayOfWeek = DayOfWeek.MONDAY, dep: int = 540):
+        outage = TrackOutage(
+            yards=(yd_a, yd_b),
+            time_bounds=[TimeBound(start=time(start), end=time(end))],
+        )
+        return determine_outage_delay(
+            yd_b,
+            yd_a,
+            [outage],
+            sim_minute=SimulationMinute(dep),
+            day=day,
+            travel_minutes=180,
+        )
+
+    assert delay("mon 10:00", "mon 11:00") == 60
+    assert delay("mon 11:00", "mon 13:00") == 120
+    assert delay("mon 08:30", "mon 09:30") == 30
+    assert delay("wed 10:00", "wed 11:00") == 0
+    assert delay("mon 01:00", "mon 02:00", DayOfWeek.TUESDAY) == 0
+    assert delay("mon 00:30", "mon 01:30", DayOfWeek.SUNDAY, dep=1380) == 60
 
 
 def test_generate_scenario_only_fills_active_days():
